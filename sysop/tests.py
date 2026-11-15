@@ -517,6 +517,17 @@ class FrontendTests(PortalTestCase):
             count += 1
         self.assertGreater(count, 20)
 
+    def test_sidebar_logo(self):
+        self.client.force_login(self.owner)
+        response = self.client.get('/sysop/')
+        # one rendering for each colour mode; CSS shows the right one
+        self.assertContains(response, 'src="/static/aprs2net-logo.png"')
+        self.assertContains(response, 'src="/static/aprs2net-logo-dark.png"')
+        self.assertContains(response, 'alt="APRS Tier 2 Network"', count=2)
+        # pages without the sidebar have no logo
+        self.client.logout()
+        self.assertNotContains(self.client.get('/accounts/login/'), 'aprs2net-logo')
+
     def test_no_inline_script_or_style(self):
         for description, response in self.pages():
             html = response.content.decode()

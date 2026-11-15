@@ -84,6 +84,10 @@
           <li class="nav-item"><a class="nav-link" href="{% url 'rotates_json' %}">Rotate List JSON</a></li>
           <li class="nav-item"><a class="nav-link" href="{% url 'server_list' %}">APRServe2.txt</a></li>
         </ul>
+        <div class="portal-logo">
+          <img class="portal-logo-light" src="{% static "aprs2net-logo.png" %}" width="358" height="160" alt="APRS Tier 2 Network">
+          <img class="portal-logo-dark" src="{% static "aprs2net-logo-dark.png" %}" width="358" height="160" alt="APRS Tier 2 Network">
+        </div>
       </nav>
       <main class="portal-main" id="content">
         {% include "includes/messages.html" %}

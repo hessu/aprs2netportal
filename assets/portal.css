@@ -78,6 +78,29 @@ html {
   background-color: #0b5ed7;
 }
 
+/*
+ * Network logo at the bottom of the sidebar column. Not shown in the narrow
+ * layout, where the sidebar is a strip of links. There are two renderings,
+ * with dark and with light lettering, for the two colour modes.
+ */
+.portal-logo {
+  display: none;
+}
+
+.portal-logo img {
+  width: 100%;
+  height: auto;
+}
+
+.portal-logo-dark,
+[data-bs-theme="dark"] .portal-logo-light {
+  display: none;
+}
+
+[data-bs-theme="dark"] .portal-logo-dark {
+  display: inline;
+}
+
 .portal-icon {
   width: .75em;
   height: .75em;
@@ -108,6 +131,12 @@ html {
 
   .portal-sidebar .nav {
     flex-direction: column;
+  }
+
+  .portal-logo {
+    display: block;
+    padding-top: 1rem;
+    margin-top: auto;
   }
 
   .portal-sidebar .nav + .nav {
