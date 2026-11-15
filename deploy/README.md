@@ -144,7 +144,8 @@ Security notes:
 ## Migrating from the Django 1.6 server
 
 Everything in this document was rehearsed in November 2026, backups and
-restores against a local S3-compatible server. This migration was rehearsed
+restores against both a local S3-compatible server and AWS S3. This migration
+was rehearsed
 with a copy of the production database (PostgreSQL 9.3):
 the three export files came out byte-identical to what the old server served.
 
@@ -332,14 +333,18 @@ last 10 minutes of changes exist only on the host.
          "Version": "2012-10-17",
          "Statement": [
            {"Effect": "Allow",
-            "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+            "Action": "s3:ListBucket",
             "Resource": "arn:aws:s3:::BUCKET"},
            {"Effect": "Allow",
             "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject",
-                       "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"],
+                       "s3:AbortMultipartUpload"],
             "Resource": "arn:aws:s3:::BUCKET/*"}
          ]
        }
+
+   Mind the two different resources: the object actions only match the
+   `/*` form. With it missing, pghoard starts and lists backups without
+   complaint but every upload fails with `AccessDenied ... s3:PutObject`.
 
 2. In `.env` set `COMPOSE_PROFILES=backup`, `PGHOARD_DB_PASSWORD` and the
    `PGHOARD_S3_*` settings.
