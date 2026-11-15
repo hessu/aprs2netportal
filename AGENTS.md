@@ -34,7 +34,12 @@ change keys, nesting or text layout without being asked to.
 - All configuration comes from environment variables (`.env`, see
   `.env.example`); `settings.py` has no deployment-specific values.
 - Bootstrap 5.3 vendored in `assets/vendor/`; no jQuery, no CDN, no inline
-  scripts or styles (tests enforce this, so that a strict CSP stays possible).
+  scripts or styles. A strict Content-Security-Policy (`settings.py`, sent by
+  `utils/middleware.py`) enforces that in the browser and tests check the
+  templates, including the admin's. Do not add `'unsafe-inline'` or
+  third-party hosts to the policy; put scripts and styles in `assets/`.
+- GitHub Actions (`.github/workflows/test.yml`) builds both images and runs
+  the tests, the migration check and `check --deploy` on every push.
 
 The code was written in 2014 for Python 2.7 / Django 1.6 / South and ported in
 2026. The pre-port code is at commit `e74f998` if behaviour needs comparing.
@@ -70,7 +75,8 @@ lotwauth/                    LoTW client certificate login (no models)
   backends.py                Authentication backend (username = callsign)
   middleware.py              Logs in from headers set by the reverse proxy
   tests.py
-utils/                       Template helpers only (no models)
+utils/                       Template helpers and middleware (no models)
+  middleware.py              Content-Security-Policy header
   templatetags/bootstrap.py  bs_widget, is_checkbox, alert_class filters
   templatetags/navigation.py {% active %} tag for nav highlighting
 templates/                   Project-level templates
