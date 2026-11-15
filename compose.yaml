@@ -46,6 +46,9 @@ services:
       retries: 6
       start_period: 30s
     shm_size: 128mb
+    networks:
+      - app
+      - backup
 
   web:
     build: .
@@ -78,6 +81,8 @@ services:
       ADMINS: ${ADMINS:-}
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
       GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
+    networks:
+      - app
     ports:
       # Plain HTTP for the reverse proxy on the same host. Do not expose this
       # port to the network: with LoTW login enabled, anyone who can reach it
@@ -121,12 +126,23 @@ services:
       PGHOARD_ENCRYPTION_KEY_ID: ${PGHOARD_ENCRYPTION_KEY_ID:-}
       PGHOARD_ENCRYPTION_PUBLIC_KEY_FILE: /keys/public.pem
       PGHOARD_ENCRYPTION_PRIVATE_KEY_FILE: /keys/private.pem
+    # pghoard's HTTP API (port 16000) has no authentication and pghoard can
+    # write to the database's data directory. Only the database needs to
+    # reach it, so it is kept off the network the application is on.
+    networks:
+      - backup
     volumes:
       - pghoard:/var/lib/pghoard
       # Same path as in the db service: when restoring, pghoard writes the
       # base backup and the WAL files the database asks for directly here.
       - pgdata:/var/lib/postgresql
       - ${PGHOARD_KEY_DIR:-./keys}:/keys:ro
+
+networks:
+  # web <-> db
+  app:
+  # db <-> pghoard. Not reachable from the web container.
+  backup:
 
 volumes:
   pgdata:
