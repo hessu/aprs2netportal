@@ -95,6 +95,7 @@ docker/
                              restore helper
 deploy/README.md             Installation, reverse proxy, migration from the
                              legacy server, upgrades, backup and restore
+deploy/nginx-t2sysop.conf    nginx reverse proxy configuration for the host
 ```
 
 ## Building and testing

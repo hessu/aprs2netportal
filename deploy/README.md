@@ -10,7 +10,7 @@ the repository:
 | `pghoard` | same image as `db` | Optional. Continuous backups to AWS S3. State lives in the `pghoard` volume. |
 
 TLS is terminated by a reverse proxy on the Docker host, which is not part of
-this repository; an nginx example is below.
+this repository; an nginx configuration for it is in `nginx-t2sysop.conf`.
 
 The host only needs Docker Engine with the compose plugin. Which distribution
 or version it runs does not matter.
@@ -63,52 +63,26 @@ automatically. Run this from cron once a week or so:
 
 ## Reverse proxy
 
-The proxy must pass the original `Host` header and set `X-Forwarded-Proto`,
-and `.env` must have `BEHIND_TLS_PROXY=1`. A minimal nginx server block:
+A ready-made nginx configuration is in
+[`nginx-t2sysop.conf`](nginx-t2sysop.conf), next to this file:
 
-    # In the http context: at most 10 login attempts a minute per address.
-    limit_req_zone $binary_remote_addr zone=t2login:10m rate=10r/m;
+    cp deploy/nginx-t2sysop.conf /etc/nginx/sites-available/t2sysop.conf
+    ln -s ../sites-available/t2sysop.conf /etc/nginx/sites-enabled/
+    # edit the server name and certificate paths if they differ
+    nginx -t && systemctl reload nginx
 
-    server {
-        listen 443 ssl;
-        listen [::]:443 ssl;
-        http2 on;
-        server_name t2sysop.aprs2.net;
+It terminates TLS with the Let's Encrypt certificate kept by dehydrated,
+redirects plain HTTP (except ACME challenges) to HTTPS, passes requests to
+the application on `127.0.0.1:8000`, and limits login and password reset
+requests to 10 a minute per client address. `.env` must have
+`BEHIND_TLS_PROXY=1` and the server name in `ALLOWED_HOSTS`.
 
-        ssl_certificate     /path/to/fullchain.pem;
-        ssl_certificate_key /path/to/privkey.pem;
-
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-
-        # Always set these, also when LoTW login is not in use: they must
-        # never arrive from a client. See the next section.
-        proxy_set_header X-SSL-Client-Verify $ssl_client_verify;
-        proxy_set_header X-SSL-Client-S-DN   $ssl_client_s_dn;
-
-        location / {
-            proxy_pass http://127.0.0.1:8000;
-        }
-
-        # The application does not limit password guessing itself.
-        location ~ ^/(accounts/login|login|admin/login|accounts/password/reset)/ {
-            limit_req zone=t2login burst=10 nodelay;
-            limit_req_status 429;
-            proxy_pass http://127.0.0.1:8000;
-        }
-    }
-
-    server {
-        listen 80;
-        listen [::]:80;
-        server_name t2sysop.aprs2.net;
-        return 301 https://$host$request_uri;
-    }
-
-Keep the `proxy_set_header` lines at the `server` level as shown. nginx drops
-all inherited ones from a `location` that has any `proxy_set_header` of its
-own, which would silently lose the `X-SSL-Client-*` overrides there.
+If you write your own configuration instead, the proxy must pass the
+original `Host` header, set `X-Forwarded-Proto`, and always set the two
+`X-SSL-Client-*` headers described in the next section. In nginx, keep all
+`proxy_set_header` lines at the `server` level: a `location` with any
+`proxy_set_header` of its own stops inheriting the others, which would
+silently lose the `X-SSL-Client-*` overrides there.
 
 The application sets the security headers itself, so the proxy should not
 add its own copies: `Strict-Transport-Security` (one year, this host name
@@ -135,13 +109,8 @@ in `/admin/` with the callsign as the username. A certificate for a callsign
 without a user gets the ordinary login page. (The Django 1.6 portal did
 create a user for any valid certificate; the users it created remain.)
 
-1. Add to the nginx `server` block:
-
-       ssl_client_certificate /etc/nginx/ssl/lotw-roots.pem;
-       ssl_verify_client      optional;
-       ssl_verify_depth       2;
-
-   together with the two `proxy_set_header X-SSL-Client-*` lines shown above.
+1. In `nginx-t2sysop.conf`, uncomment the three `ssl_client_certificate`,
+   `ssl_verify_client` and `ssl_verify_depth` lines.
 
 2. `lotw-roots.pem` must contain the current LoTW root and production CA
    certificates. The bundle on the old server (`client-trust.pem`, from 2016)
@@ -155,8 +124,8 @@ create a user for any valid certificate; the users it created remain.)
 Security notes:
 
 * The application believes the two headers. nginx must set both on every
-  request (the `proxy_set_header` lines do that, to an empty value or `NONE`
-  when there is no certificate), and nothing but nginx may be able to reach
+  request (the `proxy_set_header` lines in the configuration file do that,
+  to an empty value or `NONE` when there is no certificate), and nothing but nginx may be able to reach
   port 8000. Otherwise anyone can log in as anyone by sending the headers.
 * Use `$ssl_client_s_dn`, not `$ssl_client_s_dn_legacy`. The application
   refuses the legacy format because a name in it can be made to look like a
@@ -166,6 +135,10 @@ Security notes:
   attribute are refused by the application in any case.
 * A user whose username is not their callsign cannot use a certificate
   until an administrator renames the user.
+* With `ssl_verify_client optional`, a browser that offers some other
+  client certificate (not issued by LoTW) gets nginx's "400 The SSL
+  certificate error" page instead of the portal. The user has to pick "no
+  certificate" or the right one.
 
 ## Migrating from the Django 1.6 server
 
