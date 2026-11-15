@@ -524,6 +524,9 @@ class FrontendTests(PortalTestCase):
         self.assertContains(response, 'src="/static/aprs2net-logo.png"')
         self.assertContains(response, 'src="/static/aprs2net-logo-dark.png"')
         self.assertContains(response, 'alt="APRS Tier 2 Network"', count=2)
+        self.assertContains(
+            response,
+            '<a class="portal-logo" href="https://www.aprs2.net/" target="_blank" rel="noopener">')
         # pages without the sidebar have no logo
         self.client.logout()
         self.assertNotContains(self.client.get('/accounts/login/'), 'aprs2net-logo')
