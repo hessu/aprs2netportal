@@ -19,73 +19,95 @@ external systems that generate the aprs2.net DNS zone and monitor the network:
 **Treat the shape of these three outputs as a stable external API.** Do not
 change keys, nesting or text layout without being asked to.
 
-## Current state: legacy, not runnable on a modern system
+## Stack
 
-The code was written in 2014 and has not been touched since. It targets:
+- Python 3 / Django 5.2 LTS, using the versions packaged in Ubuntu 26.04
+  (`python3-django`, `python3-psycopg`, `gunicorn`, `python3-whitenoise`).
+  There is deliberately no `requirements.txt`: the dependency list is the
+  `apt-get install` line in `Dockerfile`.
+- PostgreSQL 18 in production (compose service `db`); SQLite when
+  `POSTGRES_HOST` is unset, which is what the test suite uses.
+- Runs as Docker containers defined in `compose.yaml`: `web` (gunicorn, static
+  files served by WhiteNoise), `db`, and optionally `pghoard` (continuous
+  backups to S3). TLS, and LoTW client certificate verification, are done by a
+  reverse proxy outside this repository.
+- All configuration comes from environment variables (`.env`, see
+  `.env.example`); `settings.py` has no deployment-specific values.
+- Bootstrap 5.3 vendored in `assets/vendor/`; no jQuery, no CDN, no inline
+  scripts or styles (tests enforce this, so that a strict CSP stays possible).
 
-- Python 2.7 (implicit relative imports, `print` statements, `unicode()`, `__unicode__`)
-- Django 1.6 (`patterns()`, string view references, `MIDDLEWARE_CLASSES`,
-  `TEMPLATE_*` settings, function-based auth views, `{% load staticfiles %}`,
-  `{% url 'dotted.view.path' %}`, `user.is_authenticated()` as a method,
-  `ForeignKey` without `on_delete`, `ModelForm` without `fields`)
-- South for schema migrations (`sysop/migrations/*.py` are South migrations,
-  not Django migrations)
-- PostgreSQL via psycopg2 in production (committed settings say sqlite3 with an
-  empty name; production edited `settings.py` in place)
-- uWSGI + nginx + Upstart on the host (`deploy/`)
-- `django_ssl_auth` (https://github.com/HamWAN/django-ssl-client-auth), an
-  external, unmaintained package that is *not* in this repo; it was symlinked
-  into the project root (see `.gitignore`) and provides TLS client certificate
-  login (ARRL LoTW certificates, users auto-created from the cert DN)
-- Bootstrap 3.1.1 and jQuery 1.11 loaded from public CDNs
-
-There is no `requirements.txt`, no packaging metadata, no CI and no real tests
-(`sysop/tests.py` is the Django 1.x placeholder). The only dependency list is
-the `pip install` line in `deploy/README.md`.
-
-An upgrade to current Django/Python, running in a container, is in progress on
-the `feature/container` branch. **Update this file as that work lands** so it
-keeps describing the code as it is.
+The code was written in 2014 for Python 2.7 / Django 1.6 / South and ported in
+2026. The pre-port code is at commit `e74f998` if behaviour needs comparing.
 
 ## Layout
 
 ```
 manage.py                    Django entry point
+compose.yaml                 web + db + pghoard services
+Dockerfile                   Application image (ubuntu:26.04 + apt packages)
+.env.example                 Every supported environment variable, documented
 aprs2netportal/              Project package
-  settings.py                Single settings module; DEBUG=True, hardcoded
-                             SECRET_KEY, no env-based configuration
-  urls.py                    Root URLconf: admin, auth/password views,
-                             /APRServe2.txt, includes sysop.urls at both
-                             /sysop/ and /
+  settings.py                Environment-driven settings
+  urls.py                    Root URLconf: admin, auth/password views;
+                             includes sysop.urls at /sysop/ (canonical, what
+                             reverse() returns) and again at / (namespace
+                             "root", kept for external consumers)
   wsgi.py                    WSGI entry point
 sysop/                       The one real application
-  models.py                  Domain, Server, Rotate, ReservedHostname
+  models.py                  Domain, Server, Rotate, ReservedHostname and the
+                             signal handlers that clear the export cache
   views.py                   JSON/text exports + login-required HTML views
   forms.py                   SysopServerForm (locks admin-only fields), UserForm
   admin.py                   Admin registrations; Rotate<->Server inline
-  urls.py                    App URLconf
+  urls.py                    App URLconf (named URLs)
   countries.py               ISO 3166 code -> name dict used as choices
   templatetags/sysop.py      {% servertable %} inclusion tag
   templates/sysop/           index, edit_server, servertable, APRServe2.txt
-  migrations/                South migrations 0001-0008 (legacy format)
-  management/commands/
-    importt2sysop.py         One-off 2014 importer from the old MySQL T2SYSOP
-                             database; dead code
-  tests.py                   Placeholder
+  migrations/0001_initial.py Matches the schema the South migrations produced
+  tests.py                   Exports, permissions, accounts, admin, frontend
+lotwauth/                    LoTW client certificate login (no models)
+  dn.py                      Subject DN parsing, callsign extraction
+  backends.py                Authentication backend (username = callsign)
+  middleware.py              Logs in from headers set by the reverse proxy
+  tests.py
 utils/                       Template helpers only (no models)
-  templatetags/addcss.py     |addcss filter: adds a CSS class to a form widget
-  templatetags/navigation.py {% active %} tag for sidebar highlighting
+  templatetags/bootstrap.py  bs_widget, is_checkbox, alert_class filters
+  templatetags/navigation.py {% active %} tag for nav highlighting
 templates/                   Project-level templates
-  base.html                  Bootstrap 3 dashboard layout, navbar, sidebar
+  base.html, base_narrow.html  Page layouts (sidebar / centered card)
+  includes/                  Shared form field, errors, messages partials
   registration/              Login, password change/reset, profile
-  admin/base_site.html       Admin branding override
-  403.html
-css/                         dashboard.css and favicon.ico; referenced via
-                             {% static %} but not wired into STATICFILES_DIRS
-                             (production copied/linked them into ./static)
-deploy/                      2014 host install notes, nginx vhost, uWSGI ini,
-                             Upstart job
+  403.html, 404.html, 500.html
+assets/                      Static sources: portal.css, portal.js, favicon,
+                             vendor/bootstrap (collected to ./staticfiles)
+docker/
+  entrypoint.sh              web container: migrate, then gunicorn
+  postgres/                  db + pghoard image (official postgres + pghoard),
+                             backup role init script, config generator,
+                             restore helper
+deploy/README.md             Installation, reverse proxy, migration from the
+                             legacy server, upgrades, backup and restore
 ```
+
+## Building and testing
+
+Nothing runs directly on the developer host: dependencies exist only in the
+image. Build it and run the tests in it:
+
+    docker build -t t2sysop-web .
+    docker run --rm -e SECRET_KEY=x t2sysop-web \
+        python3 -W error::DeprecationWarning manage.py test
+
+The build runs `collectstatic` with the manifest storage, so a broken static
+reference fails the build. Run the tests before every commit. After changing
+models, generate migrations inside the image (`manage.py makemigrations`) and
+copy the file out; `manage.py makemigrations --check` must report no changes.
+
+On the maintainer's workstation Docker runs inside the LXD container
+`t2sysop-docker` (the repository is mounted read-only at `/src`), so prefix
+the commands: `lxc exec t2sysop-docker -- sh -c 'cd /src && ...'`. That
+container has a public IP address: never publish container ports there other
+than on 127.0.0.1. See "Development environment" in `deploy/README.md`.
 
 ## Data model
 
@@ -112,36 +134,36 @@ and that servers and rotates do not share a name. Users are stock
   stored value); those fields are changed through the admin only. Note that a
   sysop *can* change `owner`, `deleted` and `authorized_sysops`.
 - **Caching:** the three export views are cached for 30 minutes with
-  `cache_page` and sent with no-cache headers to clients. `Server.save()` and
-  `Rotate.save()` call `cache.clear()`. No `CACHES` setting exists, so this is
-  the per-process local-memory cache: with several worker processes, the other
-  workers keep serving stale output until their own entry expires. M2M changes
-  that do not go through `save()` do not clear the cache at all.
-- **`servers.json` varies by authentication** via the custom
-  `cache_page_vary_authenticated` decorator (separate cache key prefix).
+  `cache_page` and sent with no-cache headers to clients. Signal handlers in
+  `sysop/models.py` clear the whole cache when a Server, Rotate, Domain,
+  rotate membership or a user's email changes. In the container the cache is
+  file based (`CACHE_DIR`) so that all gunicorn workers share it.
+- **`servers.json` varies by authentication**: authenticated requests get a
+  separate cache entry (key prefix) because they include sysop emails.
+- **`APRServe2.txt` is served with CRLF line endings** and without HTML
+  escaping. Django's template loader normalises line endings, so the view
+  re-adds them; the template file itself is also CRLF. Edit it with care.
+- **LoTW login** (`LOTW_CLIENT_CERT_AUTH`): the proxy verifies the client
+  certificate and passes `X-SSL-Client-Verify` and `X-SSL-Client-S-DN`. The
+  callsign in the DN is matched case-insensitively against usernames; unknown
+  callsigns get a new user. The headers are trusted blindly, so the
+  application port must only be reachable through the proxy. Only RFC 4514
+  DNs are accepted; the legacy slash-separated form is refused because it
+  can be spoofed through the certificate holder's name.
+- Logging out is a POST (Django 5); there is no GET logout link.
 - Soft delete: `deleted` servers stay in `servers.json` (flagged) but are
   excluded from the HTML lists and `APRServe2.txt`.
 
-## Known defects in the legacy code
+## Known rough edges
 
-Found during review; fix them as part of the modernisation rather than
-preserving them.
-
-- `settings.py` commits a `SECRET_KEY` and `DEBUG = True`. The committed key
-  must be considered public; production needs a fresh one from the environment.
-- `server_detail` uses `Server.objects.get()` — an unknown id is a 500, not a 404.
-- `RotateAdmin.queryset()` uses the pre-1.6 hook name, so the `server_count`
-  annotation is never applied.
-- `{% active %}` returns the URL name itself as the CSS class when the link is
-  not active, and compares against dotted view paths that never match.
-- Redirects and several links are hardcoded paths (`/sysop/`, `/admin/`,
-  `/sysop/server/<id>/`) instead of reversed URLs.
-- `sysop.urls` is included twice (`/sysop/` and `/`), so every page has two URLs.
-- `hostname_validator`'s message says "lowercase" but the regex accepts uppercase.
-- `base.html` still carries the Bootstrap example's placeholder dashboard as
-  default block content, and links to a Yahoo Group that no longer exists.
-- `deploy/portal_nginx.conf` has no client-certificate configuration even
-  though the settings enable `django_ssl_auth`.
+- A sysop can change `owner`, `deleted` and `authorized_sysops` of their own
+  server, and so can lock themselves out or "delete" the record. This is
+  long-standing behaviour, kept as is.
+- Every page is reachable under both `/sysop/...` and `/...`.
+- `Server.country` stores the ISO code and `APRServe2.txt` prints the code,
+  not the country name.
+- There is no uniqueness constraint on `server_id` or on hostname + domain;
+  `servers.json` is keyed by `server_id`, so duplicates silently collapse.
 
 ## Conventions
 
