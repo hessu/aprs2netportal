@@ -32,6 +32,7 @@ COPY utils ./utils
 COPY templates ./templates
 COPY assets ./assets
 COPY docker/entrypoint.sh /usr/local/bin/portal-entrypoint
+COPY docker/healthcheck.py /usr/local/bin/portal-healthcheck
 
 # Collect and compress static files into the image; WhiteNoise serves them.
 RUN SECRET_KEY=build-time-only python3 manage.py collectstatic --noinput \

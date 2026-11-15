@@ -82,6 +82,8 @@ assets/                      Static sources: portal.css, portal.js, favicon,
                              vendor/bootstrap (collected to ./staticfiles)
 docker/
   entrypoint.sh              web container: migrate, then gunicorn
+  healthcheck.py             web container health probe (sends an allowed
+                             Host header)
   postgres/                  db + pghoard image (official postgres + pghoard),
                              backup role init script, config generator,
                              restore helper
