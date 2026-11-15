@@ -13,7 +13,7 @@
       <tbody>
     {% for server in servers %}
         <tr>
-          <td><a href="/sysop/server/{{ server.id }}/">{{ server.server_id }}</a></td>
+          <td><a href="{% url 'server_detail' server.id %}">{{ server.server_id }}</a></td>
           <td><a href="http://{{ server.fqdn }}:14501/">{{ server.fqdn }}</a></td>
           <td>{{ server.owner }}</td>
           <td><a href="http://{{ server.ipv4 }}:14501/">{{ server.ipv4 }}</a></td>

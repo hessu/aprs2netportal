@@ -1,4 +1,4 @@
-;
+{% autoescape off %};
 ; This file lists the Tier2 servers with their main client port 14580
 ;
 ;
@@ -19,4 +19,4 @@
 {% for rotate in rotates %}{{ rotate.fqdn }}:14580;{{ rotate.description }}
 {% endfor %};
 {% for server in servers %}{{ server.fqdn }}:14580;User Definable Filter Port: {{ server.server_id }} {{ server.city }} {{ server.country }}
-{% endfor %}
+{% endfor %}{% endautoescape %}

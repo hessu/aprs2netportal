@@ -2,7 +2,7 @@
 {% load addcss from addcss %}
 {% block page %}
   <div class="col-md-4 col-md-offset-4" style="margin-top: 2em;">
-    <form role="form" method="post" action="{% url 'django.contrib.auth.views.login' %}">
+    <form role="form" method="post" action="{% url 'login' %}">
     {% csrf_token %}
       {% for error in form.non_field_errors %}
       <div class="alert alert-danger" role="alert">

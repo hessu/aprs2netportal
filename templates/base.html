@@ -1,4 +1,4 @@
-{% load staticfiles %}
+{% load static %}
 {% load active from navigation %}
 <!DOCTYPE html>
 <html lang="en">
@@ -32,20 +32,25 @@
             <span class="icon-bar"></span>
             <span class="icon-bar"></span>
           </button>
-          <a class="navbar-brand" href="#">APRS-IS Tier2 Sysop Portal</a>
+          <a class="navbar-brand" href="{% url 'own_servers' %}">APRS-IS Tier2 Sysop Portal</a>
         </div>
         <div class="navbar-collapse collapse">
           <ul class="nav navbar-nav navbar-right">
 {% if request.user.is_authenticated %}
-            <li><a href="{% url 'sysop.views.user_detail' %}">Welcome, {{ request.user }}!</a></li>
-            <li><a href="{% url 'django.contrib.auth.views.password_change' %}">Change Password</a></li>
+            <li><a href="{% url 'user_detail' %}">Welcome, {{ request.user }}!</a></li>
+            <li><a href="{% url 'password_change' %}">Change Password</a></li>
             {% if request.user.is_staff %}
-            <li><a href="/admin/">Admin</a></li>
+            <li><a href="{% url 'admin:index' %}">Admin</a></li>
             {% endif %}
-            <li><a href="{% url 'django.contrib.auth.views.logout_then_login' %}">Logout</a></li>
+            <li>
+              <form class="navbar-form" method="post" action="{% url 'logout' %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-link">Logout</button>
+              </form>
+            </li>
 {% else %}
-            <li><a href="{% url 'django.contrib.auth.views.login' %}">Login</a></li>
-            <li><a href="{% url 'django.contrib.auth.views.password_reset' %}">Reset Password</a></li>
+            <li><a href="{% url 'login' %}">Login</a></li>
+            <li><a href="{% url 'password_reset' %}">Reset Password</a></li>
 {% endif %}
           </ul>
         </div>
@@ -57,21 +62,20 @@
 {% block page %}
         <div class="col-sm-3 col-md-2 sidebar">
           <ul class="nav nav-sidebar">
-            <li class="{% active 'sysop.views.all_servers' %}">
-                 <a href="{% url 'sysop.views.all_servers' %}">All Servers</a>
+            <li class="{% active 'all_servers' %}">
+                 <a href="{% url 'all_servers' %}">All Servers</a>
             </li>
-            <li class="{% active 'sysop.views.own_servers' %}">
-                 <a href="{% url 'sysop.views.own_servers' %}">Your Servers</a>
+            <li class="{% active 'own_servers' %}">
+                 <a href="{% url 'own_servers' %}">Your Servers</a>
             </li>
           </ul>
           <ul class="nav nav-sidebar">
-            <li><a target="_blank" href="http://status.aprs2.net/">Status Monitor</a></li>
-            <li><a target="_blank" href="http://groups.yahoo.com/group/aprs2net">Yahoo Group</a></li>
+            <li><a target="_blank" href="https://status.aprs2.net/">Status Monitor</a></li>
           </ul>
           <ul class="nav nav-sidebar">
-            <li><a href="{% url 'sysop.views.servers_json' %}">Server List JSON</a></li>
-            <li><a href="{% url 'sysop.views.rotates_json' %}">Rotate List JSON</a></li>
-            <li><a href="{% url 'sysop.views.server_list' %}">APRServe2.txt</a></li>
+            <li><a href="{% url 'servers_json' %}">Server List JSON</a></li>
+            <li><a href="{% url 'rotates_json' %}">Rotate List JSON</a></li>
+            <li><a href="{% url 'server_list' %}">APRServe2.txt</a></li>
           </ul>
         </div>
         <div class="col-sm-9 col-sm-offset-3 col-md-10 col-md-offset-2 main">
@@ -80,161 +84,7 @@
         <div class="alert alert-{{ message.tags }}">{{ message }}</div>
     {% endfor %}
 {% endif %}
-{% block content %}
-          <h1 class="page-header">Dashboard</h1>
-
-          <div class="row placeholders">
-            <div class="col-xs-6 col-sm-3 placeholder">
-              <img data-src="holder.js/200x200/auto/sky" class="img-responsive" alt="Generic placeholder thumbnail">
-              <h4>Label</h4>
-              <span class="text-muted">Something else</span>
-            </div>
-            <div class="col-xs-6 col-sm-3 placeholder">
-              <img data-src="holder.js/200x200/auto/vine" class="img-responsive" alt="Generic placeholder thumbnail">
-              <h4>Label</h4>
-              <span class="text-muted">Something else</span>
-            </div>
-            <div class="col-xs-6 col-sm-3 placeholder">
-              <img data-src="holder.js/200x200/auto/sky" class="img-responsive" alt="Generic placeholder thumbnail">
-              <h4>Label</h4>
-              <span class="text-muted">Something else</span>
-            </div>
-            <div class="col-xs-6 col-sm-3 placeholder">
-              <img data-src="holder.js/200x200/auto/vine" class="img-responsive" alt="Generic placeholder thumbnail">
-              <h4>Label</h4>
-              <span class="text-muted">Something else</span>
-            </div>
-          </div>
-
-          <h2 class="sub-header">Section title</h2>
-          <div class="table-responsive">
-            <table class="table table-striped">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Header</th>
-                  <th>Header</th>
-                  <th>Header</th>
-                  <th>Header</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>1,001</td>
-                  <td>Lorem</td>
-                  <td>ipsum</td>
-                  <td>dolor</td>
-                  <td>sit</td>
-                </tr>
-                <tr>
-                  <td>1,002</td>
-                  <td>amet</td>
-                  <td>consectetur</td>
-                  <td>adipiscing</td>
-                  <td>elit</td>
-                </tr>
-                <tr>
-                  <td>1,003</td>
-                  <td>Integer</td>
-                  <td>nec</td>
-                  <td>odio</td>
-                  <td>Praesent</td>
-                </tr>
-                <tr>
-                  <td>1,003</td>
-                  <td>libero</td>
-                  <td>Sed</td>
-                  <td>cursus</td>
-                  <td>ante</td>
-                </tr>
-                <tr>
-                  <td>1,004</td>
-                  <td>dapibus</td>
-                  <td>diam</td>
-                  <td>Sed</td>
-                  <td>nisi</td>
-                </tr>
-                <tr>
-                  <td>1,005</td>
-                  <td>Nulla</td>
-                  <td>quis</td>
-                  <td>sem</td>
-                  <td>at</td>
-                </tr>
-                <tr>
-                  <td>1,006</td>
-                  <td>nibh</td>
-                  <td>elementum</td>
-                  <td>imperdiet</td>
-                  <td>Duis</td>
-                </tr>
-                <tr>
-                  <td>1,007</td>
-                  <td>sagittis</td>
-                  <td>ipsum</td>
-                  <td>Praesent</td>
-                  <td>mauris</td>
-                </tr>
-                <tr>
-                  <td>1,008</td>
-                  <td>Fusce</td>
-                  <td>nec</td>
-                  <td>tellus</td>
-                  <td>sed</td>
-                </tr>
-                <tr>
-                  <td>1,009</td>
-                  <td>augue</td>
-                  <td>semper</td>
-                  <td>porta</td>
-                  <td>Mauris</td>
-                </tr>
-                <tr>
-                  <td>1,010</td>
-                  <td>massa</td>
-                  <td>Vestibulum</td>
-                  <td>lacinia</td>
-                  <td>arcu</td>
-                </tr>
-                <tr>
-                  <td>1,011</td>
-                  <td>eget</td>
-                  <td>nulla</td>
-                  <td>Class</td>
-                  <td>aptent</td>
-                </tr>
-                <tr>
-                  <td>1,012</td>
-                  <td>taciti</td>
-                  <td>sociosqu</td>
-                  <td>ad</td>
-                  <td>litora</td>
-                </tr>
-                <tr>
-                  <td>1,013</td>
-                  <td>torquent</td>
-                  <td>per</td>
-                  <td>conubia</td>
-                  <td>nostra</td>
-                </tr>
-                <tr>
-                  <td>1,014</td>
-                  <td>per</td>
-                  <td>inceptos</td>
-                  <td>himenaeos</td>
-                  <td>Curabitur</td>
-                </tr>
-                <tr>
-                  <td>1,015</td>
-                  <td>sodales</td>
-                  <td>ligula</td>
-                  <td>in</td>
-                  <td>libero</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-{% endblock %}
+{% block content %}{% endblock %}
         </div>
 {% endblock %}
       </div>
