@@ -105,9 +105,14 @@ far-future cache headers); no `location /static` is needed.
 
 Sysops can log in with their ARRL Logbook of The World certificate instead of
 a password. nginx verifies the certificate and tells the application the
-result in two request headers; the application uses the callsign in the
-certificate as the username (compared case-insensitively) and, by default,
-creates a user for a callsign it has not seen before.
+result in two request headers; the application logs in the user whose
+username is the callsign in the certificate (compared case-insensitively).
+
+A certificate never creates a user. Anyone with a licence can get a LoTW
+certificate, so the user has to exist already, created by an administrator
+in `/admin/` with the callsign as the username. A certificate for a callsign
+without a user gets the ordinary login page. (The Django 1.6 portal did
+create a user for any valid certificate; the users it created remain.)
 
 1. Add to the nginx `server` block:
 
@@ -138,8 +143,8 @@ Security notes:
 * Only LoTW CAs belong in `ssl_client_certificate`. The old bundle also
   trusted the "APRS2 servers CA"; certificates without a LoTW callsign
   attribute are refused by the application in any case.
-* Set `LOTW_AUTOCREATE_USERS=0` to only let in callsigns that already have a
-  user. A new user has no servers and can only view.
+* A user whose username is not their callsign cannot use a certificate
+  until an administrator renames the user.
 
 ## Migrating from the Django 1.6 server
 
@@ -211,6 +216,8 @@ Things that change for users:
   format (unsalted MD5) that Django no longer accepts. They cannot log in
   with the old password; "Reset Password" or a LoTW certificate works.
 * Logging out is a button, not a link.
+* A LoTW certificate no longer creates an account. It logs in an existing
+  user whose username is the certificate's callsign, and nothing else.
 
 Other things on the old server that the portal's files were shared with: the
 Graphite vhost (`graph.conf`) includes `/var/www/aprs2netportal/deploy/uwsgi_params`,

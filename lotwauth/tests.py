@@ -1,10 +1,7 @@
-from unittest import mock
-
 from django.contrib.auth import get_user_model
-from django.test import SimpleTestCase, TestCase, modify_settings, override_settings
+from django.test import SimpleTestCase, TestCase, modify_settings
 
-from .backends import LoTWCertificateBackend
-from .dn import InvalidDN, parse_dn, user_data_from_dn
+from .dn import InvalidDN, parse_dn, callsign_from_dn
 
 User = get_user_model()
 
@@ -17,39 +14,34 @@ LEGACY_DN = ('/1.3.6.1.4.1.12348.1.1=N0CALL/CN=Test Middle Operator'
 
 class DNParsingTests(SimpleTestCase):
     def test_rfc_form(self):
-        self.assertEqual(user_data_from_dn(RFC_DN), {
-            'username': 'N0CALL',
-            'first_name': 'Test',
-            'last_name': 'Operator',
-            'email': 'n0call@example.com',
-        })
+        self.assertEqual(callsign_from_dn(RFC_DN), 'N0CALL')
 
     def test_legacy_form_is_refused(self):
         with self.assertRaises(InvalidDN):
-            user_data_from_dn(LEGACY_DN)
+            callsign_from_dn(LEGACY_DN)
 
     def test_duplicate_callsign_is_refused(self):
         with self.assertRaises(InvalidDN):
-            user_data_from_dn(RFC_DN + ',1.3.6.1.4.1.12348.1.1=N1CALL')
+            callsign_from_dn(RFC_DN + ',1.3.6.1.4.1.12348.1.1=N1CALL')
 
     def test_utf8string_callsign(self):
         dn = 'CN=X,1.3.6.1.4.1.12348.1.1=#0C064E3043414C4C'
-        self.assertEqual(user_data_from_dn(dn)['username'], 'N0CALL')
+        self.assertEqual(callsign_from_dn(dn), 'N0CALL')
 
     def test_plain_callsign_is_uppercased(self):
         dn = 'CN=X,1.3.6.1.4.1.12348.1.1=n0call'
-        self.assertEqual(user_data_from_dn(dn)['username'], 'N0CALL')
+        self.assertEqual(callsign_from_dn(dn), 'N0CALL')
 
     def test_non_ascii_lookalikes_are_refused(self):
         # these uppercase to "SM0CALL", "OH1AI" and "DL1SS"
         for callsign in ('\u017fm0call', 'oh1a\u0131', 'dl1\u00df'):
             with self.subTest(callsign=callsign):
                 with self.assertRaises(InvalidDN):
-                    user_data_from_dn('CN=X,1.3.6.1.4.1.12348.1.1=' + callsign)
+                    callsign_from_dn('CN=X,1.3.6.1.4.1.12348.1.1=' + callsign)
         # also when DER encoded as a UTF8String
         der = b'\x0c' + bytes([len('\u017fm0call'.encode())]) + '\u017fm0call'.encode()
         with self.assertRaises(InvalidDN):
-            user_data_from_dn('CN=X,1.3.6.1.4.1.12348.1.1=#' + der.hex())
+            callsign_from_dn('CN=X,1.3.6.1.4.1.12348.1.1=#' + der.hex())
 
     def test_escapes(self):
         attrs = parse_dn(r'CN=Last\, First,O=J\C3\A4rvi+OU=a\+b')
@@ -60,11 +52,7 @@ class DNParsingTests(SimpleTestCase):
     def test_escaped_comma_cannot_inject_callsign(self):
         dn = r'CN=Evil\,1.3.6.1.4.1.12348.1.1=N0CALL,emailAddress=e@example.com'
         with self.assertRaises(InvalidDN):
-            user_data_from_dn(dn)
-
-    def test_single_word_name(self):
-        data = user_data_from_dn('CN=Club,1.3.6.1.4.1.12348.1.1=N0CALL')
-        self.assertEqual((data['first_name'], data['last_name']), ('Club', ''))
+            callsign_from_dn(dn)
 
     def test_rejects_garbage(self):
         for dn in ('', '   ', 'CN=No Callsign', 'CN=X,1.3.6.1.4.1.12348.1.1=#zz',
@@ -72,7 +60,7 @@ class DNParsingTests(SimpleTestCase):
                    'no-equals-sign'):
             with self.subTest(dn=dn):
                 with self.assertRaises(InvalidDN):
-                    user_data_from_dn(dn)
+                    callsign_from_dn(dn)
 
 
 CERT_HEADERS = {
@@ -81,7 +69,6 @@ CERT_HEADERS = {
 }
 
 
-@override_settings(LOTW_AUTOCREATE_USERS=True)
 @modify_settings(
     MIDDLEWARE={
         'append': 'lotwauth.middleware.LoTWCertificateMiddleware',
@@ -94,84 +81,61 @@ class CertificateLoginTests(TestCase):
     def get(self, **extra):
         return self.client.get('/sysop/', secure=True, **extra)
 
-    def test_no_certificate(self):
-        self.assertRedirects(self.get(), '/accounts/login/?next=/sysop/',
+    def assertNotLoggedIn(self, response):
+        self.assertRedirects(response, '/accounts/login/?next=/sysop/',
                              fetch_redirect_response=False)
-        self.assertFalse(User.objects.exists())
 
-    def test_creates_user_and_logs_in(self):
+    def test_no_certificate(self):
+        User.objects.create_user('N0CALL')
+        self.assertNotLoggedIn(self.get())
+
+    def test_logs_in_existing_user(self):
+        user = User.objects.create_user('N0CALL', 'old@example.com', 'pw')
         response = self.get(**CERT_HEADERS)
         self.assertEqual(response.status_code, 200)
-        user = User.objects.get()
-        self.assertEqual(user.username, 'N0CALL')
-        self.assertEqual(user.email, 'n0call@example.com')
-        self.assertFalse(user.has_usable_password())
-        self.assertFalse(user.is_staff)
         self.assertEqual(response.wsgi_request.user, user)
+        # nothing is copied from the certificate
+        user.refresh_from_db()
+        self.assertEqual(user.email, 'old@example.com')
+        self.assertEqual(user.first_name, '')
         # the session persists without the certificate
         self.assertEqual(self.get().status_code, 200)
 
-    def test_matches_existing_user_case_insensitively(self):
-        existing = User.objects.create_user('n0call', 'old@example.com', 'pw')
+    def test_matches_username_case_insensitively(self):
+        user = User.objects.create_user('n0call')
         response = self.get(**CERT_HEADERS)
-        self.assertEqual(response.wsgi_request.user, existing)
-        existing.refresh_from_db()
-        self.assertEqual(existing.email, 'old@example.com')
-        self.assertEqual(User.objects.count(), 1)
-
-    def test_concurrent_first_login(self):
-        # Another request creates the user after this one has looked for it
-        # and found nothing.
-        real_find_user = LoTWCertificateBackend.find_user
-        calls = []
-
-        def racing_find_user(backend, username):
-            calls.append(username)
-            if len(calls) == 1:
-                self.assertIsNone(real_find_user(backend, username))
-                User.objects.create_user('N0CALL', 'first@example.com')
-                return None
-            return real_find_user(backend, username)
-
-        with mock.patch.object(LoTWCertificateBackend, 'find_user', racing_find_user):
-            response = self.get(**CERT_HEADERS)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(calls), 2)
-        user = User.objects.get()
-        self.assertEqual(user.email, 'first@example.com')
         self.assertEqual(response.wsgi_request.user, user)
+
+    def test_never_creates_a_user(self):
+        other = User.objects.create_user('other')
+        self.assertNotLoggedIn(self.get(**CERT_HEADERS))
+        self.assertEqual(list(User.objects.all()), [other])
 
     def test_ambiguous_callsign(self):
         User.objects.create_user('N0CALL')
         User.objects.create_user('n0call')
-        self.assertEqual(self.get(**CERT_HEADERS).status_code, 302)
-        self.assertEqual(User.objects.count(), 2)
-
-    @override_settings(LOTW_AUTOCREATE_USERS=False)
-    def test_autocreate_disabled(self):
-        self.assertEqual(self.get(**CERT_HEADERS).status_code, 302)
-        self.assertFalse(User.objects.exists())
+        self.assertNotLoggedIn(self.get(**CERT_HEADERS))
 
     def test_inactive_user(self):
         User.objects.create_user('N0CALL', is_active=False)
-        self.assertEqual(self.get(**CERT_HEADERS).status_code, 302)
+        self.assertNotLoggedIn(self.get(**CERT_HEADERS))
 
     def test_verification_failure(self):
-        headers = dict(CERT_HEADERS, HTTP_X_SSL_CLIENT_VERIFY='FAILED:certificate has expired')
-        self.assertEqual(self.get(**headers).status_code, 302)
-        headers = dict(CERT_HEADERS, HTTP_X_SSL_CLIENT_VERIFY='NONE')
-        self.assertEqual(self.get(**headers).status_code, 302)
-        self.assertFalse(User.objects.exists())
+        User.objects.create_user('N0CALL')
+        for verify in ('FAILED:certificate has expired', 'NONE', '', 'success'):
+            with self.subTest(verify=verify):
+                headers = dict(CERT_HEADERS, HTTP_X_SSL_CLIENT_VERIFY=verify)
+                self.assertNotLoggedIn(self.get(**headers))
 
     def test_requires_https(self):
+        User.objects.create_user('N0CALL')
         response = self.client.get('/sysop/', **CERT_HEADERS)
         self.assertEqual(response.status_code, 302)
-        self.assertFalse(User.objects.exists())
 
     def test_bad_dn(self):
+        User.objects.create_user('N0CALL')
         headers = dict(CERT_HEADERS, HTTP_X_SSL_CLIENT_S_DN='CN=No Callsign')
-        self.assertEqual(self.get(**headers).status_code, 302)
-        self.assertFalse(User.objects.exists())
+        self.assertNotLoggedIn(self.get(**headers))
 
     def test_password_login_still_works(self):
         User.objects.create_user('other', password='pw')
@@ -181,6 +145,6 @@ class CertificateLoginTests(TestCase):
 
 class DisabledByDefaultTests(TestCase):
     def test_headers_ignored_when_disabled(self):
+        User.objects.create_user('N0CALL')
         response = self.client.get('/sysop/', secure=True, **CERT_HEADERS)
         self.assertEqual(response.status_code, 302)
-        self.assertFalse(User.objects.exists())

@@ -2,7 +2,6 @@
 import re
 
 CALLSIGN_OID = '1.3.6.1.4.1.12348.1.1'
-EMAIL_KEYS = ('emailaddress', 'e', '1.2.840.113549.1.9.1')
 
 # ASCII letters and digits only, in either case; matched before uppercasing.
 CALLSIGN_RE = re.compile(r'^[A-Za-z0-9]+(/[A-Za-z0-9]+)*\Z')
@@ -116,8 +115,8 @@ def parse_dn(dn):
     return result
 
 
-def user_data_from_dn(dn):
-    """Return User field values for the holder of a LoTW certificate."""
+def callsign_from_dn(dn):
+    """Return the callsign, uppercased, of the holder of a LoTW certificate."""
     attrs = parse_dn(dn)
 
     # Validate the value as it is in the certificate: str.upper() turns some
@@ -126,18 +125,4 @@ def user_data_from_dn(dn):
     callsign = attrs.get(CALLSIGN_OID, '')
     if not CALLSIGN_RE.match(callsign):
         raise InvalidDN("no valid callsign in DN")
-    callsign = callsign.upper()
-
-    name = attrs.get('cn', '').split()
-    email = ''
-    for key in EMAIL_KEYS:
-        if attrs.get(key):
-            email = attrs[key]
-            break
-
-    return {
-        'username': callsign,
-        'first_name': name[0] if name else '',
-        'last_name': name[-1] if len(name) > 1 else '',
-        'email': email,
-    }
+    return callsign.upper()

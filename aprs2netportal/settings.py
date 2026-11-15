@@ -74,14 +74,14 @@ AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.ModelBackend',
 ]
 
-# ARRL Logbook of The World client certificate login. The reverse proxy
+# ARRL Logbook of The World client certificate login, for users that already
+# exist; a certificate never creates one. The reverse proxy
 # verifies the certificate and passes the result in request headers; see
 # lotwauth/__init__.py and deploy/README.md. Never enable this unless the
 # proxy overwrites these headers on every request.
 LOTW_CLIENT_CERT_AUTH = env_bool('LOTW_CLIENT_CERT_AUTH')
 LOTW_VERIFY_HEADER = 'HTTP_X_SSL_CLIENT_VERIFY'
 LOTW_DN_HEADER = 'HTTP_X_SSL_CLIENT_S_DN'
-LOTW_AUTOCREATE_USERS = env_bool('LOTW_AUTOCREATE_USERS', True)
 if LOTW_CLIENT_CERT_AUTH:
     MIDDLEWARE.insert(
         MIDDLEWARE.index('django.contrib.auth.middleware.AuthenticationMiddleware') + 1,

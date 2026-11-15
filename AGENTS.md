@@ -132,8 +132,8 @@ and that servers and rotates do not share a name. Users are stock
 - **Permissions:** any logged-in user can view any server record. Only the
   owner or an authorized sysop can save it (`sysop.views.server_detail`).
   `server_id`, `hostname` and `domain` are locked for sysops by
-  `SysopServerForm` (disabled widgets plus `clean_*` methods returning the
-  stored value); those fields are changed through the admin only. Note that a
+  `SysopServerForm` (the form fields are `disabled`, so submitted values
+  for them are ignored); those fields are changed through the admin only. Note that a
   sysop *can* change `owner`, `deleted` and `authorized_sysops`.
 - **Caching:** the three export views are cached for 30 minutes with
   `cache_page` and sent with no-cache headers to clients. Signal handlers in
@@ -147,11 +147,13 @@ and that servers and rotates do not share a name. Users are stock
   re-adds them; the template file itself is also CRLF. Edit it with care.
 - **LoTW login** (`LOTW_CLIENT_CERT_AUTH`): the proxy verifies the client
   certificate and passes `X-SSL-Client-Verify` and `X-SSL-Client-S-DN`. The
-  callsign in the DN is matched case-insensitively against usernames; unknown
-  callsigns get a new user. The headers are trusted blindly, so the
-  application port must only be reachable through the proxy. Only RFC 4514
-  DNs are accepted; the legacy slash-separated form is refused because it
-  can be spoofed through the certificate holder's name.
+  callsign in the DN is matched case-insensitively against usernames.
+  **A certificate must never create a user**: anyone with a licence can get
+  one, and the maintainer does not want that to be enough for access. Do not
+  add auto-creation back, not even as an option. The headers are trusted
+  blindly, so the application port must only be reachable through the
+  proxy. Only RFC 4514 DNs are accepted; the legacy slash-separated form is
+  refused because it can be spoofed through the certificate holder's name.
 - Logging out is a POST (Django 5); there is no GET logout link.
 - Soft delete: `deleted` servers stay in `servers.json` (flagged) but are
   excluded from the HTML lists and `APRServe2.txt`.
