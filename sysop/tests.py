@@ -8,7 +8,7 @@ from django.core import mail
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.template.loader import render_to_string
-from django.test import TestCase
+from django.test import Client, TestCase
 from django.urls import reverse
 
 from .models import Domain, ReservedHostname, Rotate, Server
@@ -663,3 +663,78 @@ class FrontendTests(PortalTestCase):
         self.assertIn('/static/portal.css', html)
         self.assertNotIn('csrf', html)
         self.assertIn('403 Forbidden', render_to_string('403.html'))
+
+
+class SecurityHeaderTests(PortalTestCase):
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.admin = User.objects.create_superuser('admin', 'admin@example.com', 'pw')
+
+    def test_headers_on_pages_and_exports(self):
+        self.client.force_login(self.owner)
+        for url in ('/sysop/', '/accounts/profile/', '/servers.json',
+                    '/APRServe2.txt', '/sysop/server/999999/'):
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                csp = response['Content-Security-Policy']
+                self.assertIn("default-src 'none'", csp)
+                self.assertIn("script-src 'self'", csp)
+                self.assertIn("style-src 'self'", csp)
+                self.assertIn("frame-ancestors 'none'", csp)
+                self.assertNotIn('unsafe', csp)
+                self.assertEqual(response['X-Frame-Options'], 'DENY')
+                self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
+                self.assertEqual(response['Referrer-Policy'], 'same-origin')
+
+    def test_login_page_has_policy(self):
+        response = self.client.get('/accounts/login/')
+        self.assertIn("form-action 'self'", response['Content-Security-Policy'])
+
+    def test_hsts_only_behind_tls_proxy(self):
+        # not configured in the test settings: plain HTTP development setups
+        # must not get pinned to HTTPS
+        response = self.client.get('/accounts/login/', secure=True)
+        self.assertNotIn('Strict-Transport-Security', response)
+        with self.settings(SECURE_HSTS_SECONDS=3600):
+            # the middleware reads the setting when it is created
+            client = Client()
+            response = client.get('/accounts/login/', secure=True)
+            self.assertEqual(response['Strict-Transport-Security'], 'max-age=3600')
+            self.assertNotIn(
+                'Strict-Transport-Security', client.get('/accounts/login/'))
+
+    def test_admin_pages_work_under_the_policy(self):
+        """The admin must not need inline scripts, handlers or styles."""
+        self.client.force_login(self.admin)
+        for url in (
+            '/admin/',
+            '/admin/sysop/server/',
+            '/admin/sysop/server/add/',
+            '/admin/sysop/server/%d/change/' % self.finland.id,
+            '/admin/sysop/rotate/%d/change/' % self.rotate.id,
+            '/admin/auth/user/',
+            '/admin/auth/user/%d/change/' % self.owner.id,
+            '/admin/auth/user/%d/password/' % self.owner.id,
+            '/admin/sysop/server/%d/delete/' % self.gone.id,
+            '/admin/sysop/server/%d/history/' % self.finland.id,
+        ):
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn('Content-Security-Policy', response)
+                html = response.content.decode()
+                for tag in re.findall(r'<script\b[^>]*>', html):
+                    # from this site (static files, the admin's /admin/jsi18n/)
+                    # or data that is not executed
+                    self.assertTrue(
+                        re.search(r' src="/[^/]', tag)
+                        or 'type="application/json"' in tag, tag)
+                self.assertEqual(re.findall(r'<style\b', html), [])
+                self.assertEqual(re.findall(r'<[^>]*\son[a-z]+\s*=[^>]*>', html), [])
+                self.assertEqual(re.findall(r'<[^>]*\sstyle\s*=[^>]*>', html), [])
+                for asset in re.findall(
+                        r'<(?:link|script|img)\b[^>]*?\s(?:href|src)="([^"]*)"', html):
+                    # same origin: not a URL with a scheme or another host
+                    self.assertRegex(asset, r'^/[^/]')
+

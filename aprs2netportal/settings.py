@@ -47,6 +47,40 @@ if env_bool('BEHIND_TLS_PROXY'):
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+    # Tell browsers to only ever use HTTPS for this host name. Deliberately
+    # without includeSubDomains: the portal links to the status pages of the
+    # Tier2 servers, http://<server>.aprs2.net:14501/, which have no TLS.
+    SECURE_HSTS_SECONDS = int(os.environ.get('HSTS_SECONDS', 365 * 24 * 3600))
+
+X_FRAME_OPTIONS = 'DENY'
+
+# "manage.py check --deploy" suggestions that are deliberately not followed:
+SILENCED_SYSTEM_CHECKS = [
+    # HSTS includeSubDomains and preload: would break the plain HTTP status
+    # page links to the Tier2 servers under aprs2.net, see above.
+    'security.W005',
+    'security.W021',
+    # Redirecting HTTP to HTTPS is the reverse proxy's job; the application
+    # is only ever spoken to over plain HTTP, by the proxy and by the
+    # container health check.
+    'security.W008',
+]
+
+# Everything the pages load comes from this site: no inline scripts or
+# styles, no third-party hosts. Keep it that way (tests check the templates)
+# rather than loosening this. data: images are used by Bootstrap's CSS for
+# its icons (select arrow, validation marks, navbar toggler).
+CONTENT_SECURITY_POLICY = {
+    'default-src': ["'none'"],
+    'script-src': ["'self'"],
+    'style-src': ["'self'"],
+    'img-src': ["'self'", 'data:'],
+    'font-src': ["'self'"],
+    'connect-src': ["'self'"],
+    'form-action': ["'self'"],
+    'frame-ancestors': ["'none'"],
+    'base-uri': ["'none'"],
+}
 
 INSTALLED_APPS = [
     'django.contrib.auth',
@@ -61,6 +95,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'utils.middleware.ContentSecurityPolicyMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',

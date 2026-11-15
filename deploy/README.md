@@ -95,6 +95,12 @@ and `.env` must have `BEHIND_TLS_PROXY=1`. A minimal nginx server block:
         return 301 https://$host$request_uri;
     }
 
+The application sets the security headers itself, so the proxy should not
+add its own copies: `Strict-Transport-Security` (one year, this host name
+only; see `HSTS_SECONDS` in `.env.example`), a `Content-Security-Policy` that
+only allows the portal's own scripts and styles, `X-Frame-Options: DENY`,
+`X-Content-Type-Options` and `Referrer-Policy`.
+
 Static files are served by the application itself (WhiteNoise, with
 far-future cache headers); no `location /static` is needed.
 
