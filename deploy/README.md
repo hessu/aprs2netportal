@@ -185,8 +185,12 @@ the three export files came out byte-identical to what the old server served.
        DROP TABLE cache;
        DROP INDEX sysop_rotate_dns_name_like;
        DROP INDEX sysop_server_dns_name_like;
-       DELETE FROM django_content_type WHERE app_label = 'south';
        EOF
+       docker compose run --rm web python3 manage.py remove_stale_contenttypes \
+           --include-stale-apps --noinput
+
+   The last command removes the admin's records of models that no longer
+   exist (South's), together with their permissions.
 
 5. `docker compose up -d`, then compare the exports with the old server:
 
