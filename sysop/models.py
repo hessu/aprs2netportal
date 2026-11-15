@@ -18,6 +18,18 @@ hostname_validator = RegexValidator(
 )
 
 
+# C0 and C1 control characters and the Unicode line separators. Free text
+# fields end up on single lines of APRServe2.txt; a line break in one would
+# let its author add lines, i.e. servers, to that file.
+CONTROL_CHARACTERS = r'[\x00-\x1f\x7f-\x9f\u2028\u2029]'
+
+no_control_characters = RegexValidator(
+    regex=CONTROL_CHARACTERS,
+    inverse_match=True,
+    message="Line breaks and other control characters are not allowed.",
+)
+
+
 class Domain(models.Model):
     """APRS server domain, e.g., aprs.net, aprs2.net, firenet.us"""
     domain = models.CharField(max_length=253, validators=[domain_validator])
@@ -40,6 +52,7 @@ class Server(models.Model):
                   "to administer this server record.")
     server_id = models.CharField(
         max_length=20, null=True, blank=True,
+        validators=[no_control_characters],
         help_text="Administrator use only.")
     hostname = models.CharField(
         max_length=63, validators=[hostname_validator],
@@ -62,17 +75,23 @@ class Server(models.Model):
         null=True, blank=True, help_text="Decimal (e.g., 00.0000)")
     longitude = models.FloatField(
         null=True, blank=True, help_text="Decimal (e.g., 000.0000)")
-    city = models.CharField(max_length=255, null=True, blank=True)
+    city = models.CharField(
+        max_length=255, null=True, blank=True,
+        validators=[no_control_characters])
     country = models.CharField(
         max_length=255, null=True, blank=True,
         choices=sorted(ISO3166.items(), key=lambda country: country[1]))
     connection_desc = models.CharField(
         max_length=255, null=True, blank=True,
+        validators=[no_control_characters],
         verbose_name="Connection description",
         help_text="ADSL, Fiber, E1, T1, 33.6 Modem, etc.")
-    connection_speed = models.CharField(max_length=255, null=True, blank=True)
+    connection_speed = models.CharField(
+        max_length=255, null=True, blank=True,
+        validators=[no_control_characters])
     site_desc = models.CharField(
         max_length=255, null=True, blank=True,
+        validators=[no_control_characters],
         verbose_name="Site description",
         help_text="Data Center, Home, etc.")
     email_alerts = models.BooleanField(blank=True, default=False)
@@ -130,8 +149,11 @@ class Server(models.Model):
 
 class Rotate(models.Model):
     """Primary and regional rotates."""
-    name = models.CharField(max_length=63, blank=True, null=True)
-    description = models.CharField(max_length=255, blank=True)
+    name = models.CharField(
+        max_length=63, blank=True, null=True,
+        validators=[no_control_characters])
+    description = models.CharField(
+        max_length=255, blank=True, validators=[no_control_characters])
     hostname = models.CharField(max_length=63, validators=[hostname_validator])
     domain = models.ForeignKey(Domain, on_delete=models.PROTECT)
     regional = models.BooleanField(

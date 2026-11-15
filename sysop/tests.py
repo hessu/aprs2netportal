@@ -1,5 +1,7 @@
 import json
 import re
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 from django.contrib import messages
 from django.contrib.auth import get_user_model
@@ -106,6 +108,17 @@ class ServersJsonTests(PortalTestCase):
         self.assertNotIn(b'owner@example.com', self.client.get('/servers.json').content)
         self.assertNotIn(b'email', self.client.get('/sysop/servers.json').content)
 
+    def test_clients_are_told_not_to_cache(self):
+        for url in ('/servers.json', '/rotates.json', '/APRServe2.txt'):
+            # the first response is generated, the second comes from the cache
+            for attempt in ('generated', 'cached'):
+                with self.subTest(url=url, attempt=attempt):
+                    response = self.client.get(url)
+                    self.assertIn('no-store', response['Cache-Control'])
+                    self.assertIn('max-age=0', response['Cache-Control'])
+                    expires = parsedate_to_datetime(response['Expires'])
+                    self.assertLessEqual(expires, datetime.now(timezone.utc))
+
     def test_also_served_under_sysop(self):
         self.assertEqual(
             self.client.get('/sysop/servers.json').content,
@@ -200,6 +213,26 @@ class ServerListTests(PortalTestCase):
 
     def test_also_served_under_sysop(self):
         self.assertEqual(self.client.get('/sysop/APRServe2.txt').status_code, 200)
+
+    def test_stored_line_breaks_cannot_add_lines(self):
+        # values that got into the database before they were validated
+        Server.objects.filter(pk=self.finland.pk).update(
+            city='Helsinki\r\nevil.example.com:14580;User Definable Filter Port: T2EVIL',
+            server_id='T2FIN\nLAND')
+        Rotate.objects.filter(pk=self.euro.pk).update(
+            description='Europe\u2028evil2.example.com:14580;x\x00\x85y')
+        text = self.client.get('/APRServe2.txt').content.decode()
+        lines = text.split('\r\n')
+        self.assertNotIn('\n', text.replace('\r\n', ''))
+        self.assertNotIn('\r', text.replace('\r\n', ''))
+        self.assertEqual([line for line in lines if line.startswith('evil')], [])
+        self.assertIn(
+            'finland.aprs2.net:14580;User Definable Filter Port: T2FIN LAND '
+            'Helsinki evil.example.com:14580;User Definable Filter Port: T2EVIL FI',
+            lines)
+        self.assertIn('euro.aprs2.net:14580;Europe evil2.example.com:14580;x y', lines)
+        # one line per regional rotate and per server, as before
+        self.assertEqual(len([line for line in lines if ':14580;' in line]), 3)
 
     def test_missing_main_rotate_is_404(self):
         self.rotate.delete()
@@ -313,6 +346,27 @@ class ServerPageTests(PortalTestCase):
         self.assertEqual(self.finland.domain, self.aprs2)
         self.assertEqual(self.finland.city, 'Espoo')
 
+    def test_line_breaks_are_refused(self):
+        self.client.force_login(self.owner)
+        url = reverse('server_detail', args=[self.finland.id])
+        for field in ('city', 'connection_desc', 'connection_speed', 'site_desc'):
+            for bad in ('Helsinki\r\nevil.example.com:14580;x', 'a\nb', 'a\rb',
+                        'a\x00b', 'a\x0bb', 'a\x85b', 'a\u2028b'):
+                with self.subTest(field=field, value=bad):
+                    response = self.client.post(
+                        url, self.form_data(self.finland, **{field: bad}))
+                    # Django has its own check, and message, for NUL
+                    self.assertContains(
+                        response,
+                        'Null characters are not allowed.' if '\x00' in bad else
+                        'Line breaks and other control characters are not allowed.')
+        self.finland.refresh_from_db()
+        self.assertEqual(self.finland.city, 'Helsinki')
+        # ordinary punctuation and non-ASCII text are fine
+        response = self.client.post(
+            url, self.form_data(self.finland, city="Jyv\u00e4skyl\u00e4; O'Hare & co"))
+        self.assertRedirects(response, '/sysop/')
+
     def test_invalid_input(self):
         self.client.force_login(self.owner)
         url = reverse('server_detail', args=[self.finland.id])
@@ -402,6 +456,14 @@ class ValidationTests(PortalTestCase):
     def test_rotate_cannot_shadow_server(self):
         with self.assertRaisesMessage(ValidationError, 'finland.aprs2.net is a server.'):
             Rotate(hostname='finland', domain=self.aprs2).full_clean()
+
+    def test_admin_only_text_fields_refuse_line_breaks(self):
+        with self.assertRaises(ValidationError):
+            Rotate(hostname='x', domain=self.aprs2, description='a\nb').full_clean()
+        with self.assertRaises(ValidationError):
+            Rotate(hostname='x', domain=self.aprs2, name='a\rb').full_clean()
+        with self.assertRaises(ValidationError):
+            Server(hostname='x', domain=self.aprs2, server_id='T2\nX').full_clean()
 
     def test_hostname_syntax(self):
         for hostname in ('-leading', 'trailing-', '12345', 'under_score', 'dot.ted', 'a' * 64):

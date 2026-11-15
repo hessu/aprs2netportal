@@ -1,4 +1,5 @@
 import json
+from functools import wraps
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -13,10 +14,32 @@ from .models import Rotate, Server
 EXPORT_CACHE_SECONDS = 60 * 30
 
 
-# The export views cache the rendered page on the server, but send
-# cache-control no-cache to the client.
+# The export views cache the rendered page on the server, but tell clients
+# and proxies not to cache it: consumers must see changes as soon as the
+# server-side cache has been cleared.
 
-def _servers_json(request):
+def cached_export(view):
+    """Decorator: cache a view's response in the server-side cache only."""
+    @never_cache
+    @wraps(view)
+    def wrapper(request, *args, **kwargs):
+        # Authenticated users get more data from servers.json, so they get
+        # separate cache entries.
+        cached_view = cache_page(
+            EXPORT_CACHE_SECONDS,
+            key_prefix="_auth_%s_" % request.user.is_authenticated,
+        )(view)
+        response = cached_view(request, *args, **kwargs)
+        # cache_page stamps the response with an Expires half an hour ahead,
+        # which never_cache would leave alone. Remove it; never_cache then
+        # sets one in the past.
+        del response['Expires']
+        return response
+    return wrapper
+
+
+@cached_export
+def servers_json(request):
     with_email = request.user.is_authenticated
     return HttpResponse(
         json.dumps(dict([
@@ -27,18 +50,7 @@ def _servers_json(request):
     )
 
 
-@never_cache
-def servers_json(request):
-    # Authenticated users get more data, so they get a separate cache entry.
-    cached_view = cache_page(
-        EXPORT_CACHE_SECONDS,
-        key_prefix="_auth_%s_" % request.user.is_authenticated,
-    )(_servers_json)
-    return cached_view(request)
-
-
-@never_cache
-@cache_page(EXPORT_CACHE_SECONDS)
+@cached_export
 def rotates_json(request):
     return HttpResponse(
         json.dumps(dict([
@@ -50,8 +62,7 @@ def rotates_json(request):
     )
 
 
-@never_cache
-@cache_page(EXPORT_CACHE_SECONDS)
+@cached_export
 def server_list(request):
     main_rotate = get_object_or_404(
         Rotate, hostname='rotate', domain__domain='aprs2.net')
