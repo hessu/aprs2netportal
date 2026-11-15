@@ -130,6 +130,15 @@ class ServersJsonTests(PortalTestCase):
         self.assertEqual(data['T2FINLAND']['email'], 'new@example.com')
 
 
+    def test_invalidated_on_owner_deletion(self):
+        self.client.force_login(self.stranger)
+        self.assertIn(b'owner@example.com', self.client.get('/servers.json').content)
+        self.owner.delete()
+        response = self.client.get('/servers.json')
+        self.assertNotIn(b'owner@example.com', response.content)
+        self.assertIsNone(json.loads(response.content)['T2FINLAND']['email'])
+
+
 class RotatesJsonTests(PortalTestCase):
     def test_content(self):
         response = self.client.get('/rotates.json')

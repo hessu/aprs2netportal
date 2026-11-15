@@ -204,8 +204,12 @@ def clear_export_cache(sender, **kwargs):
 
 
 @receiver(post_save, sender=settings.AUTH_USER_MODEL)
+@receiver(post_delete, sender=settings.AUTH_USER_MODEL)
 def clear_export_cache_on_user_change(sender, update_fields=None, **kwargs):
     # servers.json carries the owner's email address for authenticated users.
+    # Deleting a user sets Server.owner to NULL with a bulk update, which
+    # sends no signal for the servers, so the user's own deletion has to
+    # clear the cache.
     # Logging in saves only last_login, which is not worth a cache flush.
     if update_fields is None or 'email' in update_fields:
         cache.clear()
