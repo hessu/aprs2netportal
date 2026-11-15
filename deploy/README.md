@@ -78,8 +78,10 @@ requests to 10 a minute per client address. `.env` must have
 `BEHIND_TLS_PROXY=1` and the server name in `ALLOWED_HOSTS`.
 
 If you write your own configuration instead, the proxy must pass the
-original `Host` header, set `X-Forwarded-Proto`, and always set the two
-`X-SSL-Client-*` headers described in the next section. In nginx, keep all
+original `Host` header, set `X-Forwarded-Proto`, set `X-Real-IP` to the
+client address (the application's access log shows it; without it the log
+has `-`), and always set the two `X-SSL-Client-*` headers described in the
+next section. In nginx, keep all
 `proxy_set_header` lines at the `server` level: a `location` with any
 `proxy_set_header` of its own stops inheriting the others, which would
 silently lose the `X-SSL-Client-*` overrides there.
