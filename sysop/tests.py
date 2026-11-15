@@ -1,9 +1,13 @@
 import json
+import re
 
+from django.contrib import messages
 from django.contrib.auth import get_user_model
+from django.contrib.staticfiles import finders
 from django.core import mail
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.template.loader import render_to_string
 from django.test import TestCase
 from django.urls import reverse
 
@@ -278,6 +282,10 @@ class ServerPageTests(PortalTestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'Submit')
+        # shown as a disabled field set instead of an editable-looking form
+        self.assertContains(response, 'This record is read-only')
+        self.assertContains(response, '<fieldset disabled>')
+        self.assertNotContains(response, '<form class="portal-form"')
         response = self.client.post(url, self.form_data(self.finland, city='Hacked'))
         self.assertEqual(response.status_code, 200)
         self.finland.refresh_from_db()
@@ -301,6 +309,8 @@ class ServerPageTests(PortalTestCase):
         url = reverse('server_detail', args=[self.finland.id])
         response = self.client.post(url, self.form_data(self.finland, ipv4='not-an-ip'))
         self.assertContains(response, 'Enter a valid IPv4 address')
+        self.assertContains(response, 'is-invalid')
+        self.assertContains(response, 'alert-warning')
         self.finland.refresh_from_db()
         self.assertEqual(self.finland.ipv4, '192.0.2.1')
 
@@ -437,3 +447,196 @@ class AdminTests(PortalTestCase):
         self.assertNotContains(self.client.get('/sysop/'), '/admin/')
         self.client.force_login(self.admin)
         self.assertContains(self.client.get('/sysop/'), '/admin/')
+
+
+class FrontendTests(PortalTestCase):
+    """The pages load nothing from third parties and suit a strict CSP."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.admin = User.objects.create_superuser('admin', 'admin@example.com', 'pw')
+
+    def pages(self):
+        """Yield (description, response) for every kind of HTML page."""
+        anonymous = (
+            '/accounts/login/',
+            '/accounts/password/reset/',
+            '/accounts/password/reset/done/',
+            '/accounts/password/reset/bad/link/',
+            '/accounts/password/done/',
+            '/no-such-page/',
+        )
+        authenticated = (
+            '/sysop/',
+            '/sysop/all',
+            '/sysop/server/%d/' % self.finland.id,
+            '/sysop/server/%d/' % self.brazil.id,
+            '/accounts/profile/',
+            '/accounts/password/change/',
+            '/accounts/password/change/done/',
+            '/no-such-page/',
+        )
+        for url in anonymous:
+            yield 'anonymous ' + url, self.client.get(url)
+        self.client.post(
+            '/accounts/login/', {'username': 'owner', 'password': 'wrong'})
+        yield 'failed login', self.client.post(
+            '/accounts/login/', {'username': 'owner', 'password': 'wrong'})
+        for user in (self.owner, self.admin):
+            self.client.force_login(user)
+            for url in authenticated:
+                yield '%s %s' % (user, url), self.client.get(url)
+        self.client.force_login(self.owner)
+        yield 'invalid server form', self.client.post(
+            '/sysop/server/%d/' % self.finland.id, {'ipv4': 'not-an-ip'})
+        yield 'invalid profile form', self.client.post(
+            '/accounts/profile/', {'email': 'not-an-address'})
+
+    def test_assets_are_local(self):
+        count = 0
+        for description, response in self.pages():
+            html = response.content.decode()
+            with self.subTest(page=description):
+                self.assertIn(response.status_code, (200, 404))
+                self.assertIn('text/html', response['Content-Type'])
+                assets = re.findall(
+                    r'<(?:link|script|img|source|iframe)\b[^>]*?\s(?:href|src)="([^"]*)"',
+                    html)
+                self.assertGreaterEqual(len(assets), 4)
+                for asset in assets:
+                    self.assertTrue(asset.startswith('/static/'), asset)
+                    self.assertIsNotNone(
+                        finders.find(asset.removeprefix('/static/')), asset)
+                for needle in ('netdna', 'bootstrapcdn', 'googleapis', 'maxcdn',
+                               'jsdelivr', 'cdnjs', 'unpkg', 'jquery', '@import'):
+                    self.assertNotIn(needle, html.lower())
+                # the only absolute URLs are links, never something loaded
+                for tag in re.findall(r'<[^>]*(?:https?:)?//[^>]*>', html):
+                    self.assertRegex(tag, r'^<(a|svg) ', tag)
+            count += 1
+        self.assertGreater(count, 20)
+
+    def test_no_inline_script_or_style(self):
+        for description, response in self.pages():
+            html = response.content.decode()
+            with self.subTest(page=description):
+                self.assertNotIn('<style', html)
+                self.assertNotRegex(html, r'<[^>]*\sstyle=')
+                self.assertNotRegex(html, r'<[^>]*\son[a-z]+=')
+                self.assertNotIn('javascript:', html)
+                for attrs, body in re.findall(r'<script\b([^>]*)>(.*?)</script>', html, re.S):
+                    self.assertIn('src="/static/', attrs)
+                    self.assertEqual(body.strip(), '')
+
+    def test_no_bootstrap_3_leftovers(self):
+        leftovers = re.compile(
+            r'col-xs-|col-(sm|md|lg)-offset-|navbar-inverse|navbar-right|navbar-toggle\b'
+            r'|btn-default|btn-xs|form-group|form-horizontal|control-label|has-error'
+            r'|help-inline|help-block|sr-only|glyphicon|data-toggle|data-target'
+            r'|table-condensed|pull-(left|right)|img-responsive|page-header|sub-header')
+        for description, response in self.pages():
+            with self.subTest(page=description):
+                self.assertNotRegex(response.content.decode(), leftovers)
+
+    def test_logout_is_a_post_form_with_csrf_token(self):
+        self.client.force_login(self.owner)
+        for url in ('/sysop/', '/sysop/all', '/accounts/profile/'):
+            with self.subTest(url=url):
+                html = self.client.get(url).content.decode()
+                forms = re.findall(
+                    r'<form\b[^>]*\baction="/accounts/logout/"[^>]*>.*?</form>',
+                    html, re.S)
+                self.assertEqual(len(forms), 1)
+                self.assertRegex(forms[0], r'^<form\b[^>]*\bmethod="post"')
+                self.assertRegex(
+                    forms[0],
+                    r'<input type="hidden" name="csrfmiddlewaretoken" value="\w+">')
+                self.assertRegex(forms[0], r'<button type="submit"[^>]*>Logout</button>')
+                self.assertNotRegex(html, r'<a\b[^>]*href="/accounts/logout/"')
+        # no logout control for anonymous visitors
+        self.client.logout()
+        self.assertNotContains(self.client.get('/accounts/login/'), '/accounts/logout/')
+
+    def test_logout_form_passes_csrf_checks(self):
+        client = self.client_class(enforce_csrf_checks=True)
+        client.force_login(self.owner)
+        html = client.get('/sysop/').content.decode()
+        token = re.search(r'name="csrfmiddlewaretoken" value="(\w+)"', html).group(1)
+        self.assertEqual(client.post('/accounts/logout/').status_code, 403)
+        response = client.post('/accounts/logout/', {'csrfmiddlewaretoken': token})
+        self.assertRedirects(response, '/accounts/login/', fetch_redirect_response=False)
+
+    def test_active_nav_link(self):
+        self.client.force_login(self.owner)
+        current = r'<a class="nav-link active" aria-current="page" href="%s">'
+        response = self.client.get('/sysop/all')
+        self.assertContains(response, current % '/sysop/all')
+        self.assertNotContains(response, current % '/sysop/')
+        self.assertContains(response, 'aria-current="page"', count=1)
+        response = self.client.get('/sysop/')
+        self.assertContains(response, current % '/sysop/')
+        self.assertContains(response, 'aria-current="page"', count=1)
+        # legacy root URLs highlight the same link
+        self.assertContains(self.client.get('/all'), current % '/sysop/all')
+
+    def test_external_links(self):
+        self.client.force_login(self.stranger)
+        html = self.client.get('/sysop/all').content.decode()
+        # status pages of the servers are plain http
+        self.assertIn('<a href="http://finland.aprs2.net:14501/">finland.aprs2.net</a>', html)
+        self.assertIn('<a href="http://192.0.2.1:14501/">192.0.2.1</a>', html)
+        self.assertIn('<a href="http://[2001:db8::1]:14501/">2001:db8::1</a>', html)
+        for tag in re.findall(r'<a\b[^>]*target="_blank"[^>]*>', html):
+            self.assertIn('rel="noopener"', tag)
+
+    def test_form_widget_classes(self):
+        self.client.force_login(self.owner)
+        html = self.client.get('/sysop/server/%d/' % self.finland.id).content.decode()
+
+        def tag(name):
+            return re.search(r'<(?:input|select)\b[^>]*\bname="%s"[^>]*>' % name, html).group(0)
+
+        self.assertIn('class="form-control"', tag('ipv4'))
+        self.assertIn('class="form-select"', tag('country'))
+        self.assertIn('class="form-select"', tag('authorized_sysops'))
+        self.assertIn('class="form-check-input"', tag('email_alerts'))
+        self.assertIn(' disabled', tag('hostname'))
+        # every field has a label tied to it
+        for field_id in re.findall(r'<(?:input|select)\b[^>]*\bid="(id_\w+)"', html):
+            self.assertIn('for="%s"' % field_id, html)
+
+    def test_message_alert_classes(self):
+        from utils.templatetags.bootstrap import alert_class
+
+        class Message:
+            def __init__(self, level):
+                self.level_tag = messages.DEFAULT_TAGS[level]
+
+        self.assertEqual(alert_class(Message(messages.ERROR)), 'alert-danger')
+        self.assertEqual(alert_class(Message(messages.WARNING)), 'alert-warning')
+        self.assertEqual(alert_class(Message(messages.SUCCESS)), 'alert-success')
+        self.assertEqual(alert_class(Message(messages.INFO)), 'alert-info')
+        self.assertEqual(alert_class(Message(messages.DEBUG)), 'alert-secondary')
+
+    def test_saved_message_is_shown(self):
+        self.client.force_login(self.owner)
+        response = self.client.post('/accounts/profile/', {
+            'first_name': 'Olga', 'last_name': 'Owner', 'email': 'olga@example.com',
+        }, follow=True)
+        self.assertContains(
+            response,
+            '<div class="alert alert-success" role="alert">User settings saved.</div>',
+            html=True)
+
+    def test_error_pages(self):
+        response = self.client.get('/no-such-page/')
+        self.assertEqual(response.status_code, 404)
+        self.assertTemplateUsed(response, '404.html')
+        self.assertContains(response, '404 Not Found', status_code=404)
+        # the 500 page renders without a request or any context
+        html = render_to_string('500.html')
+        self.assertIn('500 Server Error', html)
+        self.assertIn('/static/portal.css', html)
+        self.assertNotIn('csrf', html)
+        self.assertIn('403 Forbidden', render_to_string('403.html'))

@@ -30,7 +30,7 @@ COPY sysop ./sysop
 COPY lotwauth ./lotwauth
 COPY utils ./utils
 COPY templates ./templates
-COPY css ./css
+COPY assets ./assets
 COPY docker/entrypoint.sh /usr/local/bin/portal-entrypoint
 
 # Collect and compress static files into the image; WhiteNoise serves them.
