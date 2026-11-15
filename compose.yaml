@@ -97,6 +97,10 @@ services:
       - ALL
     networks:
       - app
+    # A name for the Docker host, for sending mail through a mail server
+    # running there (EMAIL_HOST=host.docker.internal).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       # Plain HTTP for the reverse proxy on the same host. Do not expose this
       # port to the network: with LoTW login enabled, anyone who can reach it

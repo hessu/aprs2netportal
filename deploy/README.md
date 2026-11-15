@@ -142,6 +142,52 @@ Security notes:
   certificate error" page instead of the portal. The user has to pick "no
   certificate" or the right one.
 
+## Outbound email
+
+The portal sends password reset messages to sysops and error reports to
+`ADMINS`. Without `EMAIL_HOST` in `.env` it only prints them to the container
+log.
+
+To send through a mail server on the Docker host (postfix, for example), set
+
+    EMAIL_HOST=host.docker.internal
+    DEFAULT_FROM_EMAIL=t2sysop@aprs2.net
+    SERVER_EMAIL=t2sysop@aprs2.net
+    ADMINS=you@example.net
+
+`127.0.0.1` would not work: inside the container that is the container
+itself. `host.docker.internal` is the host's address on Docker's default
+bridge (normally 172.17.0.1), and the connection comes from the container's
+address in one of Docker's private networks, not from localhost. So a mail
+server that only serves 127.0.0.1 needs three changes on the host:
+
+1. It has to listen on that address. For postfix, in `/etc/postfix/main.cf`:
+
+       inet_interfaces = all
+
+   (Listing `127.0.0.1, 172.17.0.1` also works, but then postfix fails to
+   start at boot if it starts before Docker has created the bridge.)
+
+2. It has to relay for the containers:
+
+       mynetworks = 127.0.0.0/8 [::1]/128 172.16.0.0/12
+
+   Use the exact subnet instead of 172.16.0.0/12 if you prefer; see
+   `docker network inspect t2sysop_app`.
+
+3. The firewall has to let the containers, and nobody else, connect to
+   port 25, ahead of any rule that rejects:
+
+       iptables -I INPUT -i br-+ -s 172.16.0.0/12 -p tcp --dport 25 -j ACCEPT
+
+   With `inet_interfaces = all`, check that port 25 is not open to the
+   Internet unless the host is meant to receive mail.
+
+Then `systemctl restart postfix`, `docker compose up -d` and send a test
+message:
+
+    docker compose exec web python3 manage.py sendtestemail you@example.net
+
 ## Migrating from the Django 1.6 server
 
 Everything in this document was rehearsed in November 2026, backups and
