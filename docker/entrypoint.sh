@@ -17,6 +17,7 @@ if [ "$1" = "gunicorn" ] && [ "$#" -eq 1 ]; then
         --workers "${GUNICORN_WORKERS:-2}" \
         --threads "${GUNICORN_THREADS:-4}" \
         --access-logfile - \
+        --no-control-socket \
         --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-*}"
 fi
 

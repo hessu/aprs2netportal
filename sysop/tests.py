@@ -175,7 +175,7 @@ class ServerListTests(PortalTestCase):
     def test_content(self):
         response = self.client.get('/APRServe2.txt')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response['Content-Type'], 'text/plain')
+        self.assertEqual(response['Content-Type'], 'text/plain; charset=utf-8')
         text = response.content.decode()
         self.assertTrue(text.startswith(';\r\n; This file lists the Tier2 servers'))
         # Regional rotates, then a separator, then the non-deleted servers of

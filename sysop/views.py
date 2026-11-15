@@ -63,7 +63,7 @@ def server_list(request):
     # The file has always been served with DOS line endings for the APRS
     # client software reading it. Template loading normalises them away.
     text = text.replace('\r\n', '\n').replace('\n', '\r\n')
-    return HttpResponse(text, content_type="text/plain")
+    return HttpResponse(text, content_type="text/plain; charset=utf-8")
 
 
 @login_required
