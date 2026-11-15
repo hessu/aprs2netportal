@@ -192,10 +192,13 @@ the three export files came out byte-identical to what the old server served.
    The last command removes the admin's records of models that no longer
    exist (South's), together with their permissions.
 
-5. `docker compose up -d`, then compare the exports with the old server:
+5. `docker compose up -d`, then compare the exports with the old server. The
+   application only answers to the names in `ALLOWED_HOSTS`, so a request
+   straight to port 8000 has to say which host it is for:
 
        for f in servers.json rotates.json APRServe2.txt; do
-           curl -s http://127.0.0.1:8000/$f | cmp - <(curl -s https://t2sysop.aprs2.net/$f) && echo "$f identical"
+           curl -s -H 'Host: t2sysop.aprs2.net' http://127.0.0.1:8000/$f |
+               cmp - <(curl -s https://t2sysop.aprs2.net/$f) && echo "$f identical"
        done
 
 6. Point the reverse proxy (or DNS) at the new installation.
@@ -462,7 +465,15 @@ backup was taken).
        docker compose exec db psql -U portal portal -c "SELECT count(*) FROM sysop_server"
        docker compose up -d
 
-6. Remove `private.pem` from the server again.
+6. Remove `private.pem` from the server again, and restart pghoard:
+
+       rm keys/private.pem
+       docker compose restart pghoard
+
+   The restart matters: pghoard's configuration file in the `pghoard` volume
+   is written when the container starts and holds a copy of the key. Until
+   it is rewritten without it, the key is still on the server, next to the
+   S3 credentials.
 
 7. After restoring to a target time, change `PGHOARD_SITE` in `.env` to a new
    name and `docker compose up -d`. **Until you do, nothing is being backed
