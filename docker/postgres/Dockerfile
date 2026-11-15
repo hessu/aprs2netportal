@@ -18,10 +18,17 @@ RUN apt-get update \
 # which fails with pydantic 2 ("cannot pickle '_thread.lock' object" on every
 # upload); fixed on master. Move to the next release tag once there is one.
 ARG PGHOARD_VERSION=93d9010580bed65a27e2204e15a2102d2564e19a
+# Everything pghoard pulls in from PyPI is held to the versions in
+# constraints.txt; a package missing from that file fails the check below.
+COPY constraints.txt /tmp/constraints.txt
 RUN python3 -m venv /opt/pghoard \
  && /opt/pghoard/bin/pip install --no-cache-dir \
+        --constraint /tmp/constraints.txt \
         "pghoard @ git+https://github.com/Aiven-Open/pghoard.git@${PGHOARD_VERSION}" \
-        botocore packaging
+        botocore packaging \
+ && /opt/pghoard/bin/pip freeze --exclude pghoard | sort > /tmp/installed.txt \
+ && grep -v '^#' /tmp/constraints.txt | grep . | sort > /tmp/expected.txt \
+ && diff /tmp/expected.txt /tmp/installed.txt
 
 FROM postgres:${POSTGRES_VERSION}
 RUN apt-get update \
