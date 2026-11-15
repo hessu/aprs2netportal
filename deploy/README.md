@@ -66,6 +66,9 @@ automatically. Run this from cron once a week or so:
 The proxy must pass the original `Host` header and set `X-Forwarded-Proto`,
 and `.env` must have `BEHIND_TLS_PROXY=1`. A minimal nginx server block:
 
+    # In the http context: at most 10 login attempts a minute per address.
+    limit_req_zone $binary_remote_addr zone=t2login:10m rate=10r/m;
+
     server {
         listen 443 ssl;
         listen [::]:443 ssl;
@@ -75,16 +78,24 @@ and `.env` must have `BEHIND_TLS_PROXY=1`. A minimal nginx server block:
         ssl_certificate     /path/to/fullchain.pem;
         ssl_certificate_key /path/to/privkey.pem;
 
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        # Always set these, also when LoTW login is not in use: they must
+        # never arrive from a client. See the next section.
+        proxy_set_header X-SSL-Client-Verify $ssl_client_verify;
+        proxy_set_header X-SSL-Client-S-DN   $ssl_client_s_dn;
+
         location / {
             proxy_pass http://127.0.0.1:8000;
-            proxy_set_header Host $host;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        }
 
-            # Always set these, also when LoTW login is not in use: they
-            # must never arrive from a client. See the next section.
-            proxy_set_header X-SSL-Client-Verify $ssl_client_verify;
-            proxy_set_header X-SSL-Client-S-DN   $ssl_client_s_dn;
+        # The application does not limit password guessing itself.
+        location ~ ^/(accounts/login|login|admin/login|accounts/password/reset)/ {
+            limit_req zone=t2login burst=10 nodelay;
+            limit_req_status 429;
+            proxy_pass http://127.0.0.1:8000;
         }
     }
 
@@ -94,6 +105,10 @@ and `.env` must have `BEHIND_TLS_PROXY=1`. A minimal nginx server block:
         server_name t2sysop.aprs2.net;
         return 301 https://$host$request_uri;
     }
+
+Keep the `proxy_set_header` lines at the `server` level as shown. nginx drops
+all inherited ones from a `location` that has any `proxy_set_header` of its
+own, which would silently lose the `X-SSL-Client-*` overrides there.
 
 The application sets the security headers itself, so the proxy should not
 add its own copies: `Strict-Transport-Security` (one year, this host name
@@ -343,6 +358,15 @@ How recent "a few minutes ago" is: WAL is uploaded one complete segment at a
 time, and the database is told to finish the current segment every 10 minutes
 if anything changed (`POSTGRES_ARCHIVE_TIMEOUT`, seconds). So at most the
 last 10 minutes of changes exist only on the host.
+
+If pghoard is stopped or cannot reach S3, the database keeps the WAL it has
+not received yet, up to `POSTGRES_WAL_KEEP_SIZE` (4 GB, which is 256
+segments: at least 42 hours of constant changes, normally weeks), and
+pghoard catches up when it is back. After a longer outage than that the
+archive has a gap: pghoard logs `requested WAL segment ... has already been
+removed`, and a point-in-time restore cannot cross the gap. Fix it by
+switching to a new `PGHOARD_SITE` name, which starts over with a fresh base
+backup; restores to times before the gap still work from the old site.
 
 ### Setting up
 

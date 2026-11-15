@@ -21,9 +21,13 @@ services:
       PGHOARD_DB_PASSWORD: ${PGHOARD_DB_PASSWORD:-}
     command:
       - postgres
-      # Keep some WAL around so that pghoard can catch up after a short outage.
+      # Keep WAL around so that pghoard can catch up after an outage without
+      # a gap in the archive. With the forced segment switch below, every 10
+      # minutes with changes uses up one 16 MB segment, so 4 GB is at least
+      # 42 hours of continuous activity, and in practice weeks. The space is
+      # only taken as WAL is produced.
       - -c
-      - wal_keep_size=256MB
+      - wal_keep_size=${POSTGRES_WAL_KEEP_SIZE:-4GB}
       # pghoard uploads WAL one complete 16 MB segment at a time, and this
       # database can take weeks to fill one. Force a segment switch this
       # often when there have been changes, so that a restore from S3 loses
@@ -46,6 +50,11 @@ services:
       retries: 6
       start_period: 30s
     shm_size: 128mb
+    # No "no-new-privileges" here or on pghoard: both start as root and switch
+    # to the postgres user with gosu. That should work with the option, but
+    # it hung under nested AppArmor in the development environment and has
+    # not been tried on a plain Docker host, and a database that does not
+    # start is a poor trade for it.
     networks:
       - app
       - backup
@@ -81,6 +90,11 @@ services:
       ADMINS: ${ADMINS:-}
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
       GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
+    # Runs as an unprivileged user and needs no capabilities at all.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     networks:
       - app
     ports:
