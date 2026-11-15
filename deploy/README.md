@@ -178,15 +178,103 @@ server that only serves 127.0.0.1 needs three changes on the host:
 3. The firewall has to let the containers, and nobody else, connect to
    port 25, ahead of any rule that rejects:
 
-       iptables -I INPUT -i br-+ -s 172.16.0.0/12 -p tcp --dport 25 -j ACCEPT
+       -A HOST-INPUT -i br-+ -s 172.16.0.0/12 -p tcp --dport 25 -j ACCEPT
 
-   With `inet_interfaces = all`, check that port 25 is not open to the
-   Internet unless the host is meant to receive mail.
+   See "Host firewall" below. With `inet_interfaces = all`, check that
+   port 25 is not open to the Internet unless the host is meant to receive
+   mail.
 
 Then `systemctl restart postfix`, `docker compose up -d` and send a test
 message:
 
     docker compose exec web python3 manage.py sendtestemail you@example.net
+
+## Host firewall
+
+Docker maintains its own iptables chains for the containers and they are
+lost if the host's rules are reloaded the usual way: `iptables-restore`
+empties every chain in the tables its input names. This is a way to keep the
+host's own rules in a file and apply them without disturbing Docker. It is
+for a host that uses `iptables` (also the nftables-backed one) with the
+`netfilter-persistent` package; Docker itself needs none of it.
+
+What the portal needs from the host's firewall, if it filters incoming
+connections at all:
+
+* TCP ports 80 and 443 open for nginx.
+* nginx must be able to connect to 127.0.0.1:8000. A firewall that rejects
+  by default and accepts loopback traffic one port at a time needs a rule
+  for it; without one nginx logs "connect() failed (111: Connection
+  refused)" and answers 502.
+* Port 8000 must not be reachable from anywhere else. Docker publishes it on
+  127.0.0.1 only (`WEB_BIND`), so no rule is needed for that.
+* Port 25 from the containers, if they send mail through the host; see
+  "Outbound email".
+
+The host's rules go in a chain of their own, `HOST-INPUT`. With `--noflush`,
+`iptables-restore` leaves everything alone except the user-defined chains
+declared in its input, which it empties and refills in one atomic step.
+
+`/etc/iptables/rules.v4` is only a skeleton. It is loaded at boot, before
+Docker starts and adds its chains:
+
+    *filter
+    :INPUT DROP [0:0]
+    :FORWARD ACCEPT [0:0]
+    :OUTPUT ACCEPT [0:0]
+    :HOST-INPUT - [0:0]
+    -A INPUT -j HOST-INPUT
+    COMMIT
+
+The rules themselves are in `/etc/iptables/host-input.v4`, in the order they
+are tried. For example:
+
+    *filter
+    :HOST-INPUT - [0:0]
+    -A HOST-INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    -A HOST-INPUT -p icmp -j ACCEPT
+    -A HOST-INPUT -p tcp --dport 22 -j ACCEPT
+    -A HOST-INPUT -p tcp -m multiport --dports 80,443 -j ACCEPT
+    # nginx to the portal
+    -A HOST-INPUT -i lo -p tcp --dport 8000 -j ACCEPT
+    # the portal's containers to the mail server on the host
+    -A HOST-INPUT -i br-+ -s 172.16.0.0/12 -p tcp --dport 25 -j ACCEPT
+    -A HOST-INPUT -j REJECT --reject-with icmp-port-unreachable
+    COMMIT
+
+After editing the file, check it and apply it:
+
+    iptables-restore --noflush --test /etc/iptables/host-input.v4 && \
+    iptables-restore --noflush /etc/iptables/host-input.v4
+
+To load it at boot, right after the skeleton, run
+`systemctl edit netfilter-persistent` and enter:
+
+    [Service]
+    ExecStartPost=/sbin/iptables-restore --noflush /etc/iptables/host-input.v4
+
+IPv6 works the same way, with `rules.v6`, a `host-input.v6`,
+`ip6tables-restore` and a second `ExecStartPost` line. Remember that IPv6
+needs ICMPv6 (`-p ipv6-icmp -j ACCEPT`) for neighbour discovery.
+
+To move a running host to this layout without a reboot, load the chain and
+put the jump first in `INPUT`. The old rules after it are no longer reached
+and can be deleted one by one, or left for the next reboot to clear:
+
+    iptables-restore --noflush /etc/iptables/host-input.v4
+    iptables -I INPUT 1 -j HOST-INPUT
+
+Things to avoid:
+
+* Do not apply changes with `systemctl restart netfilter-persistent`,
+  `netfilter-persistent reload` or a plain `iptables-restore`. They empty
+  Docker's chains, and the containers lose their network until
+  `systemctl restart docker`.
+* Do not run `netfilter-persistent save` or `iptables-save > rules.v4`: it
+  writes Docker's runtime rules into the skeleton.
+* Always run the `--test` form first. If `host-input.v4` does not load at
+  boot, what remains is the skeleton's `DROP` policy, and the host accepts
+  no connections at all, SSH included.
 
 ## Migrating from the Django 1.6 server
 
