@@ -1,6 +1,9 @@
+from unittest import mock
+
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, modify_settings, override_settings
 
+from .backends import LoTWCertificateBackend
 from .dn import InvalidDN, parse_dn, user_data_from_dn
 
 User = get_user_model()
@@ -36,6 +39,17 @@ class DNParsingTests(SimpleTestCase):
     def test_plain_callsign_is_uppercased(self):
         dn = 'CN=X,1.3.6.1.4.1.12348.1.1=n0call'
         self.assertEqual(user_data_from_dn(dn)['username'], 'N0CALL')
+
+    def test_non_ascii_lookalikes_are_refused(self):
+        # these uppercase to "SM0CALL", "OH1AI" and "DL1SS"
+        for callsign in ('\u017fm0call', 'oh1a\u0131', 'dl1\u00df'):
+            with self.subTest(callsign=callsign):
+                with self.assertRaises(InvalidDN):
+                    user_data_from_dn('CN=X,1.3.6.1.4.1.12348.1.1=' + callsign)
+        # also when DER encoded as a UTF8String
+        der = b'\x0c' + bytes([len('\u017fm0call'.encode())]) + '\u017fm0call'.encode()
+        with self.assertRaises(InvalidDN):
+            user_data_from_dn('CN=X,1.3.6.1.4.1.12348.1.1=#' + der.hex())
 
     def test_escapes(self):
         attrs = parse_dn(r'CN=Last\, First,O=J\C3\A4rvi+OU=a\+b')
@@ -104,6 +118,34 @@ class CertificateLoginTests(TestCase):
         existing.refresh_from_db()
         self.assertEqual(existing.email, 'old@example.com')
         self.assertEqual(User.objects.count(), 1)
+
+    def test_concurrent_first_login(self):
+        # Another request creates the user after this one has looked for it
+        # and found nothing.
+        real_find_user = LoTWCertificateBackend.find_user
+        calls = []
+
+        def racing_find_user(backend, username):
+            calls.append(username)
+            if len(calls) == 1:
+                self.assertIsNone(real_find_user(backend, username))
+                User.objects.create_user('N0CALL', 'first@example.com')
+                return None
+            return real_find_user(backend, username)
+
+        with mock.patch.object(LoTWCertificateBackend, 'find_user', racing_find_user):
+            response = self.get(**CERT_HEADERS)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(calls), 2)
+        user = User.objects.get()
+        self.assertEqual(user.email, 'first@example.com')
+        self.assertEqual(response.wsgi_request.user, user)
+
+    def test_ambiguous_callsign(self):
+        User.objects.create_user('N0CALL')
+        User.objects.create_user('n0call')
+        self.assertEqual(self.get(**CERT_HEADERS).status_code, 302)
+        self.assertEqual(User.objects.count(), 2)
 
     @override_settings(LOTW_AUTOCREATE_USERS=False)
     def test_autocreate_disabled(self):

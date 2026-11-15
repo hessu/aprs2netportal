@@ -4,7 +4,8 @@ import re
 CALLSIGN_OID = '1.3.6.1.4.1.12348.1.1'
 EMAIL_KEYS = ('emailaddress', 'e', '1.2.840.113549.1.9.1')
 
-CALLSIGN_RE = re.compile(r'^[A-Z0-9]+(/[A-Z0-9]+)*$')
+# ASCII letters and digits only, in either case; matched before uppercasing.
+CALLSIGN_RE = re.compile(r'^[A-Za-z0-9]+(/[A-Za-z0-9]+)*\Z')
 
 # ASN.1 string types and the encodings of their contents
 _DER_STRING_ENCODINGS = {
@@ -119,9 +120,13 @@ def user_data_from_dn(dn):
     """Return User field values for the holder of a LoTW certificate."""
     attrs = parse_dn(dn)
 
-    callsign = attrs.get(CALLSIGN_OID, '').strip().upper()
+    # Validate the value as it is in the certificate: str.upper() turns some
+    # non-ASCII letters into ASCII ones (ſ -> S, ß -> SS), which must not
+    # become a way to spell somebody else's callsign.
+    callsign = attrs.get(CALLSIGN_OID, '')
     if not CALLSIGN_RE.match(callsign):
         raise InvalidDN("no valid callsign in DN")
+    callsign = callsign.upper()
 
     name = attrs.get('cn', '').split()
     email = ''
